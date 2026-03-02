@@ -212,8 +212,8 @@ def detect_role(email):
         if any(kw in text for kw in role["keywords"]):
             log.info(f"  🎯 Matched: {role['name']}")
             return role
-    log.info("  🎯 No specific role → Default")
-    return DEFAULT_ROLE
+    log.info("  🎯 No matching role keywords → Skipping")
+    return None
 
 def extract_address(s):
     m = re.search(r"<(.+?)>", s)
