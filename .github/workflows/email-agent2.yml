@@ -1,0 +1,41 @@
+name: AI Email Agent - Malathi (Data Analyst)
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # every 10 minutes
+  workflow_dispatch:           # manual trigger anytime
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Email Agent - Malathi
+        env:
+          YOUR_NAME:               ${{ secrets.YOUR_NAME }}
+          YOUR_EMAIL:              ${{ secrets.YOUR_EMAIL }}
+          GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
+          RESUME_DATA_ANALYST_B64: ${{ secrets.RESUME_DATA_ANALYST_B64 }}
+          CC_DATA_ANALYST:         ${{ secrets.CC_DATA_ANALYST }}
+        run: python agent2.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-malathi-${{ github.run_number }}
+          path: logs/
+          retention-days: 30
