@@ -364,7 +364,10 @@ def main():
         matched += 1
 
         try:
-            role = detect_role(email)
+ role = detect_role(email)
+            if role is None:
+                log.info("  ⏭ Skipping — no matching role keywords")
+                continue
             send_reply(email, role, your_name, your_email, app_password)
             log_sent(email, role)
         except Exception as e:
