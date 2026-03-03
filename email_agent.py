@@ -164,7 +164,7 @@ def detect_role(email):
         if any(kw in subject for kw in role["keywords"]):
             log.info(f"  Matched: {role['name']}")
             return role
-    return ROLES[0]
+    return None  # FIX 1: correct indentation, return None instead of defaulting to ROLES[0]
 
 def extract_address(s):
     m = re.search(r"<(.+?)>", s)
@@ -174,7 +174,11 @@ def get_resume(role):
     fname = role["resume_file"]
     if not Path(fname).exists(): raise ValueError(f"Resume file '{fname}' not found!")
     log.info(f"  Resume: {fname}")
-    b64 = re.sub(r'\s+', '', Path(fname).read_text().strip())
+    raw = Path(fname).read_bytes()
+    if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        b64 = re.sub(r'\s+', '', raw.decode('utf-16').strip())
+    else:
+        b64 = re.sub(r'\s+', '', raw.decode('latin-1').strip())
     return base64.b64decode(b64)
 
 def send_reply(email, role, your_email, app_password):
@@ -228,9 +232,12 @@ def main():
     for email in emails:
         log.info(f"\nJOB EMAIL: {email['subject']}")
         log.info(f"   From: {email['sender']}")
-        matched += 1
         try:
             role = detect_role(email)
+            if role is None:  # FIX 2: skip emails with no matching role
+                log.info("  No matching role — skipping")
+                continue
+            matched += 1
             send_reply(email, role, your_email, app_password)
             log_sent(email, role)
             mail = mark_as_replied(mail, email["uid"], your_email, app_password)
