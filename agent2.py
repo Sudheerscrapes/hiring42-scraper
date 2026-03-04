@@ -177,7 +177,7 @@ class EmailAgent:
         return uid_set
 
     def _parse_header(self, uid) -> dict | None:
-        _, hdr_data = self.mail.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
+        _, hdr_data = self.mail.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
         if not hdr_data or hdr_data[0] is None:
             return None
         raw = hdr_data[0][1].decode("utf-8", errors="ignore")
@@ -194,7 +194,7 @@ class EmailAgent:
         return {"subject": subject, "message_id": message_id, "sender": sender, "reply_to": reply_to}
 
     def _parse_body(self, uid) -> str:
-        _, msg_data = self.mail.fetch(uid, "(RFC822)")
+        _, msg_data = self.mail.fetch(uid, "(BODY.PEEK[])")
         if not msg_data or msg_data[0] is None:
             return ""
         msg = emaillib.message_from_bytes(msg_data[0][1])
