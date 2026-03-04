@@ -22,9 +22,10 @@ jobs:
 
       - name: Run Email Agent - Swarna
         env:
-          YOUR_EMAIL:         ${{ secrets.YOUR_EMAIL }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          CC_DATA:            ${{ secrets.CC_DATA_ENGINEER }}
+          YOUR_EMAIL:               ${{ secrets.YOUR_EMAIL }}
+          GMAIL_APP_PASSWORD:       ${{ secrets.GMAIL_APP_PASSWORD }}
+          CC_DATA:                  ${{ secrets.CC_DATA_ENGINEER }}
+          RESUME_DATA_ENGINEER_B64: ${{ secrets.RESUME_DATA_ENGINEER_B64 }}
         run: python agent1.py
 
       - name: Upload logs
