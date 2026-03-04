@@ -1,6 +1,6 @@
 """
-AI Email Agent - Malathi Gambiraopet
-Only replies to: Data Analyst roles
+AI Email Agent - Manasa Janga
+Only replies to: Frontend / Software Engineer roles
 Searches Gmail by keyword in subject - today only
 """
 
@@ -25,7 +25,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("logs/agent2.log"),
+        logging.FileHandler("logs/agent3.log"),
         logging.StreamHandler()
     ]
 )
@@ -33,58 +33,55 @@ log = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 REPLIED_LABEL = "AutoReplied"
-RESUME_FILE   = "resume_data_analyst_b64.txt"
-RESUME_NAME   = "Resume_Malathi_Gambiraopet.docx"
+RESUME_FILE   = "resume_manasa_b64.txt"
+RESUME_NAME   = "Resume_Manasa_Janga.docx"
 SKIP_SENDERS  = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
 
 REPLY_BODY = """Hi,
 
-I hope you're doing well. I'm writing to express my interest in the Data Analyst opportunity.
+I hope you're doing well. I'm writing to express my interest in the Software Engineer opportunity.
 
-I am a results-driven Senior Data Analyst with 8+ years of experience transforming raw data into actionable insights, specializing in financial reporting, business intelligence, and data visualization. I have expertise in SQL, Python (Pandas, NumPy), R, Tableau, Power BI, and cloud platforms including AWS (Redshift, S3, Athena) and GCP (BigQuery), with a strong background in ETL pipelines, data modeling, variance analysis, KPI tracking, and data governance using tools like Collibra and Snowflake.
+I am a Senior Software Engineer with 10+ years of experience in web application development, specializing in frontend technologies including React.js, Angular, TypeScript, and JavaScript. I have hands-on expertise building scalable SPAs, reusable component libraries, REST API integrations, and CI/CD pipelines using Azure DevOps. I am experienced with Redux, React Router, Material UI, Tailwind CSS, React Native, and testing frameworks like Jest, with a strong background in Agile/Scrum environments and cross-functional team collaboration.
 
 I've attached my resume for your review. I'd appreciate the opportunity to connect and discuss how my skills could be a great fit for your team.
 
 Thank you for your time and consideration.
 
 Best regards,
-Malathi Gambiraopet
+Manasa Janga
 Phone: +1 609 323 0664
-Email: gmalathi211@gmail.com"""
+Email: mjanga90@gmail.com"""
 
 ROLES = [
     {
-        "name": "Data Analyst",
-        "cc_secret": "CC_DATA_ANALYST",
+        "name": "Senior Software Engineer",
+        "cc_secret": "CC_SOFTWARE_ENGINEER",
         "keywords": [
             # Job title
-            "data analyst", "senior data analyst", "sr. data analyst",
-            "sr data analyst", "lead data analyst",
-            # Business Intelligence
-            "bi analyst", "business intelligence analyst",
-            "business analyst", "analytics analyst",
-            # Reporting & Visualization
-            "reporting analyst", "data reporting analyst",
-            "tableau developer", "power bi developer",
-            "data visualization analyst", "insights analyst",
-            "dashboard analyst",
-            # Financial / Domain-specific
-            "financial analyst", "financial data analyst",
-            "risk analyst", "risk data analyst",
-            "operations analyst", "marketing analyst",
-            # SQL / Python focused
-            "sql analyst", "sql developer analyst",
-            # Healthcare / Clinical
-            "clinical data analyst", "healthcare data analyst",
-            # Cloud / Data platforms
-            "aws data analyst", "gcp data analyst",
-            "snowflake analyst", "redshift analyst",
-            "bigquery analyst",
-            # Governance / Quality
-            "data governance analyst", "data quality analyst",
-            "metadata analyst",
-            # KPI / Performance
-            "kpi analyst", "performance analyst",
+            "software engineer", "senior software engineer", "sr software engineer",
+            "sr. software engineer", "lead software engineer",
+            "software developer", "senior software developer",
+            "full stack engineer", "full stack developer",
+            # Frontend focused
+            "frontend engineer", "front end engineer", "front-end engineer",
+            "frontend developer", "front end developer", "front-end developer",
+            "senior frontend engineer", "senior frontend developer",
+            "ui engineer", "ui developer", "ui/ux engineer",
+            # React specific
+            "react engineer", "react developer", "react.js developer",
+            "react js developer", "senior react developer",
+            "react native developer", "react native engineer",
+            # Angular specific
+            "angular developer", "angular engineer",
+            "senior angular developer",
+            # JavaScript / TypeScript
+            "javascript developer", "javascript engineer",
+            "typescript developer", "typescript engineer",
+            # Web / SPA
+            "web developer", "web application developer",
+            "spa developer", "single page application developer",
+            # Cloud / DevOps adjacent
+            "azure frontend", "azure react developer",
         ],
     },
 ]
@@ -325,7 +322,7 @@ class EmailAgent:
 
     def run(self):
         log.info("=" * 55)
-        log.info("AI Email Agent - Malathi Gambiraopet (Data Analyst)")
+        log.info("AI Email Agent - Manasa Janga (Senior Software Engineer)")
         log.info(f"Time: {datetime.now().isoformat()}")
         log.info("=" * 55)
 
@@ -353,7 +350,7 @@ class EmailAgent:
         except Exception:
             pass
 
-        log.info(f"\nDone - Replied to {matched} Data Analyst emails")
+        log.info(f"\nDone - Replied to {matched} Software Engineer emails")
         log.info("Cost: 0.00")
 
 
