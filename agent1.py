@@ -83,7 +83,7 @@ ROLES = [
             "azure data factory", "azure synapse",
             # General
             "data warehouse engineer", "data lake engineer",
-            "analytics engineer", "data platform engineer",
+            "data platform engineer",
         ],
     },
 ]
@@ -185,7 +185,17 @@ class EmailAgent:
             m = re.search(pattern, raw, re.IGNORECASE | re.DOTALL)
             return m.group(1).strip() if m else ""
 
-        subject    = extract(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)").replace("\r\n", " ").replace("\n", " ")
+        subject_raw = extract(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)").replace("\r\n", " ").replace("\n", " ")
+        # Decode encoded subjects like =?utf-8?B?...?= or =?iso-8859-1?Q?...?=
+        from email.header import decode_header
+        decoded_parts = decode_header(subject_raw)
+        subject = ""
+        for part, enc in decoded_parts:
+            if isinstance(part, bytes):
+                subject += part.decode(enc or "utf-8", errors="ignore")
+            else:
+                subject += part
+        subject = subject.strip()
         message_id = extract(r"Message-ID:\s*(.+?)(?:\r?\n(?!\s)|\Z)") or uid.decode()
         sender     = extract(r"From:\s*(.+?)(?:\r?\n(?!\s)|\Z)")
         reply_to   = extract(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)") or sender
@@ -337,11 +347,15 @@ class EmailAgent:
         self.connect()
         emails  = self.fetch_matching_emails()
         matched = 0
+        sent_ids = set()  # prevent duplicate sends in same run
 
         for email in emails:
             log.info(f"\nJOB EMAIL: {email['subject']}")
             log.info(f"   From: {email['sender']}")
             try:
+                if email["message_id"] in sent_ids:
+                    log.info("  Duplicate in this run — skipping")
+                    continue
                 role = self.detect_role(email)
                 if role is None:
                     log.info("  No matching role — skipping")
@@ -350,6 +364,7 @@ class EmailAgent:
                 self.send_reply(email, role)
                 self.log_sent(email, role)
                 self.mark_as_replied(email["uid"])
+                sent_ids.add(email["message_id"])
             except Exception as e:
                 log.error(f"Error: {e}", exc_info=True)
 
