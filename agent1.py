@@ -1,31 +1,49 @@
 """
 AI Email Agent - Swarna M
 Only replies to: Data Engineer roles
-Searches Gmail by keyword in subject only
+Searches Gmail by keyword in subject - today only
 """
 
-import os, base64, logging, re, smtplib, time
+import os
+import re
+import base64
+import time
+import smtplib
+import imaplib
+import logging
+import email as emaillib
 from pathlib import Path
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-import imaplib
-import email as emaillib
 
+# ── Logging Setup ──────────────────────────────────────────────────────────────
 Path("logs").mkdir(exist_ok=True)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("logs/agent1.log"), logging.StreamHandler()])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("logs/agent.log"),
+        logging.StreamHandler()
+    ]
+)
 log = logging.getLogger(__name__)
 
-SHARED_REPLY = """Hi,
+# ── Constants ──────────────────────────────────────────────────────────────────
+REPLIED_LABEL = "AutoReplied"
+RESUME_FILE   = "resume_de_b64.txt"
+RESUME_NAME   = "Resume_Swarna_M.docx"
+SKIP_SENDERS  = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
 
-I hope you're doing well. I'm writing to express my interest in any suitable Data Engineer opportunities that match my background and experience.
+REPLY_BODY = """Hi,
 
-I am a Senior Data Engineer with 8+ years of experience architecting and optimizing scalable data pipelines across AWS, Azure, and GCP. My expertise includes ETL development, Spark, Kafka, Airflow, Snowflake, BigQuery, Redshift, and data warehouse solutions.
+I hope you're doing well. I'm writing to express my interest in the Data Engineer opportunity.
 
-I've attached my resume for your review. I'd appreciate the opportunity to connect and discuss how my skills could be a good fit for your team.
+I am a results-driven Senior Data Engineer with 8+ years of experience architecting, developing, and optimizing scalable data pipelines and platforms across AWS, Azure, and GCP. I have proven expertise in building robust ETL workflows, real-time data streaming solutions, and cloud-native data architectures using Spark, Airflow, Snowflake, Kafka, and PySpark. I am experienced in designing end-to-end data solutions that support analytics, reporting, and machine learning pipelines, with a strong background in SQL, Python, and CI/CD practices.
+
+I've attached my resume for your review. I'd appreciate the opportunity to connect and discuss how my skills could be a great fit for your team.
 
 Thank you for your time and consideration.
 
@@ -37,206 +55,319 @@ Email: mswarna574@gmail.com"""
 ROLES = [
     {
         "name": "Data Engineer",
+        "cc_secret": "CC_DATA",
         "keywords": [
-            "data engineer", "senior data engineer", "cloud data engineer",
-            "big data engineer", "aws data engineer", "azure data engineer",
-            "gcp data engineer", "snowflake data engineer",
-            "etl developer", "etl engineer", "data pipeline engineer",
-            "dataops engineer", "healthcare data engineer",
-            "data warehouse engineer", "spark engineer",
-            "databricks engineer", "data platform engineer",
-            "data integration engineer", "analytics engineer",
-            "data infrastructure engineer", "hadoop engineer",
-            "kafka engineer", "airflow engineer",
+            # Job title
+            "data engineer", "senior data engineer", "sr. data engineer",
+            "sr data engineer", "lead data engineer", "data engineering",
+            "gcp data engineer", "aws data engineer", "azure data engineer",
+            # ETL / Pipeline
+            "etl engineer", "etl developer", "etl pipeline",
+            "data pipeline", "pipeline engineer", "data integration engineer",
+            # Big Data / Hadoop
+            "big data engineer", "hadoop engineer", "spark engineer",
+            "pyspark engineer", "hive developer",
+            # Streaming
+            "kafka engineer", "kafka developer", "kinesis engineer",
+            "streaming engineer", "real-time data engineer",
+            # Orchestration
+            "airflow engineer", "airflow developer", "apache airflow",
+            # Cloud data warehouses
+            "snowflake engineer", "snowflake developer",
+            "redshift engineer", "bigquery engineer", "synapse engineer",
+            # AWS data stack
+            "aws glue", "aws emr", "aws redshift",
+            # GCP data stack
+            "bigquery developer", "gcp data engineer",
+            # Azure data stack
+            "azure data factory", "azure synapse",
+            # General
+            "data warehouse engineer", "data lake engineer",
+            "analytics engineer", "data platform engineer",
         ],
-        "resume_file": "resume_data_engineer.b64",
-        "cc_secret": "CC_DATA_ENGINEER",
-        "reply": SHARED_REPLY,
     },
 ]
 
-REPLIED_LABEL = "AutoReplied"
-SKIP_SENDERS = ["noreply.github.com", "notifications@github.com", "github.com"]
 
-def connect_imap(your_email, app_password):
-    mail = imaplib.IMAP4_SSL("imap.gmail.com")
-    mail.login(your_email, app_password)
-    mail.select("inbox")
-    return mail
+# ── Email Agent Class ──────────────────────────────────────────────────────────
+class EmailAgent:
 
-def ensure_label_exists(mail):
-    try: mail.create(REPLIED_LABEL)
-    except Exception: pass
+    def __init__(self, your_email: str, app_password: str):
+        self.your_email   = your_email
+        self.app_password = app_password
+        self.mail         = None
 
-def get_replied_message_ids(mail):
-    replied_ids = set()
-    try:
-        mail.select(REPLIED_LABEL)
-        _, msg_ids = mail.search(None, "ALL")
-        for uid in msg_ids[0].split():
-            try:
-                _, msg_data = mail.fetch(uid, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
-                raw = msg_data[0][1].decode("utf-8", errors="ignore")
-                m = re.search(r"Message-ID:\s*(.+)", raw, re.IGNORECASE)
-                if m: replied_ids.add(m.group(1).strip())
-            except Exception: pass
-    except Exception: pass
-    mail.select("inbox")
-    return replied_ids
+    # ── IMAP Helpers ───────────────────────────────────────────────────────────
 
-def mark_as_replied(mail, uid, your_email, app_password):
-    for attempt in range(3):
+    def _imap_connect(self) -> imaplib.IMAP4_SSL:
+        conn = imaplib.IMAP4_SSL("imap.gmail.com")
+        conn.login(self.your_email, self.app_password)
+        conn.select("inbox")
+        return conn
+
+    def connect(self):
+        log.info("Connecting to Gmail via IMAP...")
+        self.mail = self._imap_connect()
+        self._ensure_label()
+
+    def _ensure_label(self):
         try:
-            fresh = connect_imap(your_email, app_password)
-            fresh.select("inbox")
-            fresh.copy(uid, REPLIED_LABEL)
-            fresh.logout()
-            return mail
-        except Exception as e:
-            log.warning(f"  Mark attempt {attempt+1} failed: {e}")
-            time.sleep(2)
-    log.error("  Failed to mark email as replied after 3 attempts")
-    return mail
+            self.mail.create(REPLIED_LABEL)
+        except Exception:
+            pass
 
-def fetch_todays_matching_emails(your_email, app_password):
-    log.info("Connecting to Gmail via IMAP...")
-    mail = connect_imap(your_email, app_password)
-    ensure_label_exists(mail)
-    replied_ids = get_replied_message_ids(mail)
-    log.info(f"Already replied to {len(replied_ids)} emails previously")
-    today = datetime.now().strftime("%d-%b-%Y")
-    all_uid_set = set()
-    for role in ROLES:
-        for kw in role["keywords"]:
+    def _reconnect_if_needed(self, index: int):
+        if index > 0 and index % 50 == 0:
             try:
-                _, msg_ids = mail.search(None, f'(UNSEEN SINCE "{today}" SUBJECT "{kw}")')
-                for uid in msg_ids[0].split(): all_uid_set.add(uid)
-            except Exception: pass
-    ids = list(all_uid_set)
-    log.info(f"Found {len(ids)} matching unread emails today")
-    emails, seen_uids = [], set()
-    for i, uid in enumerate(ids):
-        uid_str = uid.decode()
-        if uid_str in seen_uids: continue
-        seen_uids.add(uid_str)
-        if i > 0 and i % 10 == 0:
-            try: mail.logout()
-            except Exception: pass
-            log.info(f"  Reconnecting IMAP at email {i}...")
-            time.sleep(2)
-            mail = connect_imap(your_email, app_password)
-        try:
-            _, msg_data = mail.fetch(uid, "(RFC822)")
-            if not msg_data or msg_data[0] is None: continue
-            raw = msg_data[0][1]
-            msg = emaillib.message_from_bytes(raw)
-            message_id = msg.get("Message-ID", uid_str).strip()
-            if message_id in replied_ids:
-                log.info(f"  Already replied: {msg.get('Subject', '')[:60]}")
-                continue
-            sender = msg.get("From", "")
-            if any(skip in sender for skip in SKIP_SENDERS):
-                log.info(f"  Skipping notification: {msg.get('Subject', '')[:60]}")
-                continue
-            body = ""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                        break
-            else:
-                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-            emails.append({"uid": uid_str, "message_id": message_id,
-                "subject": msg.get("Subject", ""), "sender": msg.get("From", ""),
-                "reply_to": msg.get("Reply-To", msg.get("From", "")), "body": body[:4000]})
-            time.sleep(0.3)
-        except Exception as e:
-            log.error(f"Error reading email {uid_str}: {e}")
+                self.mail.logout()
+            except Exception:
+                pass
+            log.info(f"  Reconnecting IMAP at email {index}...")
             time.sleep(1)
-    return emails, mail
+            self.mail = self._imap_connect()
 
-def detect_role(email):
-    subject = email["subject"].lower()
-    for role in ROLES:
-        if any(kw in subject for kw in role["keywords"]):
-            log.info(f"  Matched: {role['name']}")
-            return role
-    return ROLES[0]
+    # ── Replied-IDs Tracking ───────────────────────────────────────────────────
 
-def extract_address(s):
-    m = re.search(r"<(.+?)>", s)
-    return m.group(1) if m else s.strip()
+    def get_replied_ids(self) -> set:
+        replied = set()
+        try:
+            self.mail.select(REPLIED_LABEL)
+            _, msg_ids = self.mail.search(None, "ALL")
+            if msg_ids[0]:
+                uid_list = ",".join(m.decode() for m in msg_ids[0].split())
+                _, data = self.mail.fetch(uid_list, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
+                for item in data:
+                    if isinstance(item, tuple):
+                        raw = item[1].decode("utf-8", errors="ignore")
+                        match = re.search(r"Message-ID:\s*(.+)", raw, re.IGNORECASE)
+                        if match:
+                            replied.add(match.group(1).strip())
+        except Exception:
+            pass
+        self.mail.select("inbox")
+        log.info(f"Already replied to {len(replied)} emails previously")
+        return replied
 
-def get_resume(role):
-    fname = role["resume_file"]
-    if not Path(fname).exists(): raise ValueError(f"Resume file '{fname}' not found!")
-    log.info(f"  Resume: {fname}")
-    b64 = re.sub(r'\s+', '', Path(fname).read_text().strip())
-    return base64.b64decode(b64)
+    def mark_as_replied(self, uid: str):
+        for attempt in range(3):
+            try:
+                fresh = self._imap_connect()
+                fresh.select("inbox")
+                fresh.copy(uid, REPLIED_LABEL)
+                fresh.logout()
+                return
+            except Exception as e:
+                log.warning(f"  Mark attempt {attempt + 1} failed: {e}")
+                time.sleep(2)
+        log.error("  Failed to mark email as replied after 3 attempts")
 
-def send_reply(email, role, your_email, app_password):
-    to_email = extract_address(email["reply_to"] or email["sender"])
-    cc_email = os.environ.get(role["cc_secret"], "")
-    subject = f"Re: {email['subject']}" if not email["subject"].lower().startswith("re:") else email["subject"]
-    msg = MIMEMultipart()
-    msg["From"] = your_email
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    if cc_email: msg["Cc"] = cc_email
-    msg.attach(MIMEText(role["reply"], "plain"))
-    resume_bytes = get_resume(role)
-    part = MIMEBase("application", "vnd.openxmlformats-officedocument.wordprocessingml.document")
-    part.set_payload(resume_bytes)
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", 'attachment; filename="Resume_Swarna_M.docx"')
-    msg.attach(part)
-    recipients = [to_email]
-    if cc_email: recipients.append(cc_email)
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(your_email, app_password)
-        server.sendmail(your_email, recipients, msg.as_string())
-    log.info(f"  Sent to: {to_email}")
-    if cc_email: log.info(f"  CC'd:    {cc_email}")
-    time.sleep(3)
+    # ── Email Fetching ─────────────────────────────────────────────────────────
 
-def log_sent(email, role):
-    csv_path = "logs/sent_log.csv"
-    is_new = not os.path.exists(csv_path)
-    with open(csv_path, "a") as f:
-        if is_new: f.write("timestamp,role,sender,subject,cc\n")
-        cc = os.environ.get(role["cc_secret"], "none")
-        f.write(f'{datetime.now().isoformat()},"{role["name"]}","{email["sender"]}","{email["subject"]}","{cc}"\n')
+    def _search_uids_by_keywords(self, today: str) -> set:
+        uid_set = set()
+        for role in ROLES:
+            for kw in role["keywords"]:
+                try:
+                    _, msg_ids = self.mail.search(None, f'(UNSEEN SINCE "{today}" SUBJECT "{kw}")')
+                    for uid in msg_ids[0].split():
+                        uid_set.add(uid)
+                except Exception:
+                    pass
+        return uid_set
 
+    def _parse_header(self, uid) -> dict | None:
+        _, hdr_data = self.mail.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
+        if not hdr_data or hdr_data[0] is None:
+            return None
+        raw = hdr_data[0][1].decode("utf-8", errors="ignore")
+
+        def extract(pattern):
+            m = re.search(pattern, raw, re.IGNORECASE | re.DOTALL)
+            return m.group(1).strip() if m else ""
+
+        subject    = extract(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)").replace("\r\n", " ").replace("\n", " ")
+        message_id = extract(r"Message-ID:\s*(.+?)(?:\r?\n(?!\s)|\Z)") or uid.decode()
+        sender     = extract(r"From:\s*(.+?)(?:\r?\n(?!\s)|\Z)")
+        reply_to   = extract(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)") or sender
+
+        return {"subject": subject, "message_id": message_id, "sender": sender, "reply_to": reply_to}
+
+    def _parse_body(self, uid) -> str:
+        _, msg_data = self.mail.fetch(uid, "(RFC822)")
+        if not msg_data or msg_data[0] is None:
+            return ""
+        msg = emaillib.message_from_bytes(msg_data[0][1])
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
+                    return part.get_payload(decode=True).decode("utf-8", errors="ignore")
+        else:
+            return msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+        return ""
+
+    def fetch_matching_emails(self) -> list:
+        replied_ids = self.get_replied_ids()
+        today       = datetime.now().strftime("%d-%b-%Y")
+        uid_set     = self._search_uids_by_keywords(today)
+        log.info(f"Found {len(uid_set)} matching unread emails today")
+
+        results, seen = [], set()
+        for i, uid in enumerate(uid_set):
+            uid_str = uid.decode()
+            if uid_str in seen:
+                continue
+            seen.add(uid_str)
+            self._reconnect_if_needed(i)
+
+            try:
+                headers = self._parse_header(uid)
+                if not headers:
+                    continue
+
+                if headers["message_id"] in replied_ids:
+                    log.info(f"  Already replied: {headers['subject'][:60]}")
+                    continue
+
+                if any(skip in headers["sender"].lower() for skip in SKIP_SENDERS):
+                    log.info(f"  Skipping: {headers['subject'][:60]}")
+                    continue
+
+                body = self._parse_body(uid)
+                results.append({**headers, "uid": uid_str, "body": body[:4000]})
+                log.info(f"  Queued: {headers['subject'][:60]}")
+                time.sleep(0.2)
+
+            except Exception as e:
+                log.error(f"Error reading email {uid_str}: {e}")
+                time.sleep(1)
+
+        log.info(f"Matched {len(results)} emails to reply to")
+        return results
+
+    # ── Role Detection ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def detect_role(email: dict) -> dict | None:
+        subject = email["subject"].lower()
+        for role in ROLES:
+            if any(kw in subject for kw in role["keywords"]):
+                log.info(f"  Matched: {role['name']}")
+                return role
+        return None
+
+    # ── Resume Loading ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def load_resume() -> bytes:
+        path = Path(RESUME_FILE)
+        if not path.exists():
+            raise FileNotFoundError(f"Resume file '{RESUME_FILE}' not found!")
+        log.info(f"  Resume: {RESUME_FILE}")
+        raw = path.read_bytes()
+        if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+            b64 = re.sub(r'\s+', '', raw.decode('utf-16').strip())
+        else:
+            b64 = re.sub(r'\s+', '', raw.decode('latin-1').strip())
+        return base64.b64decode(b64)
+
+    # ── Sending Reply ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_address(s: str) -> str:
+        m = re.search(r"<(.+?)>", s)
+        return m.group(1) if m else s.strip()
+
+    def send_reply(self, email: dict, role: dict):
+        to_email = self._extract_address(email["reply_to"] or email["sender"])
+        cc_email = os.environ.get(role["cc_secret"], "")
+        subject  = email["subject"] if email["subject"].lower().startswith("re:") else f"Re: {email['subject']}"
+
+        msg = MIMEMultipart()
+        msg["From"]    = self.your_email
+        msg["To"]      = to_email
+        msg["Subject"] = subject
+        if cc_email:
+            msg["Cc"] = cc_email
+
+        msg.attach(MIMEText(REPLY_BODY, "plain"))
+
+        resume_bytes = self.load_resume()
+        attachment   = MIMEBase("application", "vnd.openxmlformats-officedocument.wordprocessingml.document")
+        attachment.set_payload(resume_bytes)
+        encoders.encode_base64(attachment)
+        attachment.add_header("Content-Disposition", f'attachment; filename="{RESUME_NAME}"')
+        msg.attach(attachment)
+
+        recipients = [to_email] + ([cc_email] if cc_email else [])
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(self.your_email, self.app_password)
+            server.sendmail(self.your_email, recipients, msg.as_string())
+
+        log.info(f"  Sent to: {to_email}")
+        if cc_email:
+            log.info(f"  CC'd:    {cc_email}")
+        time.sleep(3)
+
+    # ── CSV Logging ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def log_sent(email: dict, role: dict):
+        csv_path = Path("logs/sent_log.csv")
+        write_header = not csv_path.exists()
+        with csv_path.open("a") as f:
+            if write_header:
+                f.write("timestamp,role,sender,subject,cc\n")
+            cc = os.environ.get(role["cc_secret"], "none")
+            f.write(f'{datetime.now().isoformat()},"{role["name"]}","{email["sender"]}","{email["subject"]}","{cc}"\n')
+
+    # ── Main Run Loop ──────────────────────────────────────────────────────────
+
+    def run(self):
+        log.info("=" * 55)
+        log.info("AI Email Agent - Swarna M (Data Engineer)")
+        log.info(f"Time: {datetime.now().isoformat()}")
+        log.info("=" * 55)
+
+        self.connect()
+        emails  = self.fetch_matching_emails()
+        matched = 0
+
+        for email in emails:
+            log.info(f"\nJOB EMAIL: {email['subject']}")
+            log.info(f"   From: {email['sender']}")
+            try:
+                role = self.detect_role(email)
+                if role is None:
+                    log.info("  No matching role — skipping")
+                    continue
+                matched += 1
+                self.send_reply(email, role)
+                self.log_sent(email, role)
+                self.mark_as_replied(email["uid"])
+            except Exception as e:
+                log.error(f"Error: {e}", exc_info=True)
+
+        try:
+            self.mail.logout()
+        except Exception:
+            pass
+
+        log.info(f"\nDone - Replied to {matched} Data Engineer emails")
+        log.info("Cost: 0.00")
+
+
+# ── Entry Point ────────────────────────────────────────────────────────────────
 def main():
-    log.info("=" * 55)
-    log.info("AI Email Agent - Swarna M (FREE Gmail SMTP)")
-    log.info(f"Time: {datetime.now().isoformat()}")
-    log.info("=" * 55)
-    your_email = os.environ.get("YOUR_EMAIL", "")
+    your_email   = os.environ.get("YOUR_EMAIL", "")
     app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
-    missing = []
-    if not your_email: missing.append("YOUR_EMAIL")
-    if not app_password: missing.append("GMAIL_APP_PASSWORD")
+
+    missing = [k for k, v in {"YOUR_EMAIL": your_email, "GMAIL_APP_PASSWORD": app_password}.items() if not v]
     if missing:
         log.error(f"Missing secrets: {', '.join(missing)}")
         return
-    emails, mail = fetch_todays_matching_emails(your_email, app_password)
-    matched = 0
-    for email in emails:
-        log.info(f"\nJOB EMAIL: {email['subject']}")
-        log.info(f"   From: {email['sender']}")
-        matched += 1
-        try:
-            role = detect_role(email)
-            send_reply(email, role, your_email, app_password)
-            log_sent(email, role)
-            mail = mark_as_replied(mail, email["uid"], your_email, app_password)
-        except Exception as e:
-            log.error(f"Error: {e}", exc_info=True)
-    try: mail.logout()
-    except Exception: pass
-    log.info(f"\nDone - Replied to {matched} job emails")
-    log.info("Cost: 0.00")
+
+    EmailAgent(your_email, app_password).run()
+
 
 if __name__ == "__main__":
     main()
