@@ -1,7 +1,7 @@
 """
 AI Email Agent - Lingaraju Modhala
 Only replies to: DevOps, Cloud Engineer, SRE
-Fetches all unread emails today, filters by subject in Python
+Searches Gmail by keyword in subject - no date limit
 """
 
 import os, base64, logging, re, smtplib, time
@@ -70,8 +70,6 @@ ROLES = [
     },
 ]
 
-ALL_KEYWORDS = [kw for role in ROLES for kw in role["keywords"]]
-
 REPLIED_LABEL = "AutoReplied"
 SKIP_SENDERS = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
 
@@ -116,33 +114,38 @@ def mark_as_replied(mail, uid, your_email, app_password):
     log.error("  Failed to mark email as replied after 3 attempts")
     return mail
 
-def subject_matches(subject):
-    s = subject.lower()
-    return any(kw in s for kw in ALL_KEYWORDS)
-
-def fetch_todays_matching_emails(your_email, app_password):
+def fetch_matching_emails(your_email, app_password):
     log.info("Connecting to Gmail via IMAP...")
     mail = connect_imap(your_email, app_password)
     ensure_label_exists(mail)
     replied_ids = get_replied_message_ids(mail)
     log.info(f"Already replied to {len(replied_ids)} emails previously")
 
-    today = datetime.now().strftime("%d-%b-%Y")
-    _, msg_ids = mail.search(None, f'(UNSEEN SINCE "{today}")')
-    all_ids = msg_ids[0].split()
-    log.info(f"Found {len(all_ids)} total unread emails today")
+    # Search IMAP directly by keyword — only fetch matching emails
+    all_uid_set = set()
+    for role in ROLES:
+        for kw in role["keywords"]:
+            try:
+                _, msg_ids = mail.search(None, f'(UNSEEN SUBJECT "{kw}")')
+                for uid in msg_ids[0].split():
+                    all_uid_set.add(uid)
+            except Exception:
+                pass
+
+    ids = list(all_uid_set)
+    log.info(f"Found {len(ids)} matching unread emails")
 
     emails, seen_uids = [], set()
-    for i, uid in enumerate(all_ids):
+    for i, uid in enumerate(ids):
         uid_str = uid.decode()
         if uid_str in seen_uids: continue
         seen_uids.add(uid_str)
 
-        if i > 0 and i % 10 == 0:
+        if i > 0 and i % 50 == 0:
             try: mail.logout()
             except Exception: pass
             log.info(f"  Reconnecting IMAP at email {i}...")
-            time.sleep(2)
+            time.sleep(1)
             mail = connect_imap(your_email, app_password)
 
         try:
@@ -152,9 +155,6 @@ def fetch_todays_matching_emails(your_email, app_password):
 
             subj_match = re.search(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
             subject = subj_match.group(1).strip().replace("\r\n", " ").replace("\n", " ") if subj_match else ""
-
-            if not subject_matches(subject):
-                continue
 
             mid_match = re.search(r"Message-ID:\s*(.+)", hdr_raw, re.IGNORECASE)
             message_id = mid_match.group(1).strip() if mid_match else uid_str
@@ -167,7 +167,7 @@ def fetch_todays_matching_emails(your_email, app_password):
             sender = sender_match.group(1).strip() if sender_match else ""
 
             if any(skip in sender.lower() for skip in SKIP_SENDERS):
-                log.info(f"  Skipping notification: {subject[:60]}")
+                log.info(f"  Skipping: {subject[:60]}")
                 continue
 
             rt_match = re.search(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
@@ -191,7 +191,7 @@ def fetch_todays_matching_emails(your_email, app_password):
                 "reply_to": reply_to, "body": body[:4000]
             })
             log.info(f"  Queued: {subject[:60]}")
-            time.sleep(0.3)
+            time.sleep(0.2)
 
         except Exception as e:
             log.error(f"Error reading email {uid_str}: {e}")
@@ -269,7 +269,7 @@ def main():
     if missing:
         log.error(f"Missing secrets: {', '.join(missing)}")
         return
-    emails, mail = fetch_todays_matching_emails(your_email, app_password)
+    emails, mail = fetch_matching_emails(your_email, app_password)
     matched = 0
     for email in emails:
         log.info(f"\nJOB EMAIL: {email['subject']}")
