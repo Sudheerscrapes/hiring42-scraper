@@ -151,7 +151,7 @@ def fetch_matching_emails(your_email, app_password):
             mail = connect_imap(your_email, app_password)
 
         try:
-            _, hdr_data = mail.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
+            _, hdr_data = mail.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
             if not hdr_data or hdr_data[0] is None: continue
             hdr_raw = hdr_data[0][1].decode("utf-8", errors="ignore")
 
@@ -175,7 +175,7 @@ def fetch_matching_emails(your_email, app_password):
             rt_match = re.search(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
             reply_to = rt_match.group(1).strip() if rt_match else sender
 
-            _, msg_data = mail.fetch(uid, "(RFC822)")
+            _, msg_data = mail.fetch(uid, "(BODY.PEEK[])")
             if not msg_data or msg_data[0] is None: continue
             msg = emaillib.message_from_bytes(msg_data[0][1])
             body = ""
