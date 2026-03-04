@@ -1,7 +1,7 @@
 """
 AI Email Agent - Lingaraju Modhala
 Only replies to: DevOps, Cloud Engineer, SRE
-Searches Gmail by keyword in subject only
+Fetches all unread emails today, filters by subject in Python
 """
 
 import os, base64, logging, re, smtplib, time
@@ -37,29 +37,44 @@ Email: rajumodhala777@gmail.com"""
 ROLES = [
     {
         "name": "DevOps Engineer",
-        "keywords": ["devops engineer", "devops lead", "ci/cd engineer", "build and release", "devsecops", "release engineer"],
+        "keywords": [
+            "devops", "dev ops", "ci/cd", "build and release",
+            "devsecops", "release engineer", "pipeline engineer",
+            "infrastructure engineer", "platform engineer",
+        ],
         "resume_file": "resume_b64.txt",
         "cc_secret": "CC_DEVOPS",
         "reply": SHARED_REPLY,
     },
     {
         "name": "Cloud Engineer",
-        "keywords": ["cloud engineer", "aws engineer", "azure engineer", "gcp engineer", "cloud architect", "cloud infrastructure"],
+        "keywords": [
+            "cloud engineer", "cloud architect", "cloud infrastructure",
+            "aws engineer", "aws architect", "aws devops",
+            "azure engineer", "azure architect", "azure devops",
+            "gcp engineer", "gcp architect",
+        ],
         "resume_file": "resume_b64.txt",
         "cc_secret": "CC_CLOUD",
         "reply": SHARED_REPLY,
     },
     {
         "name": "Site Reliability Engineer",
-        "keywords": ["site reliability engineer", "sre engineer", "sre lead", "sre -", "- sre"],
+        "keywords": [
+            "site reliability", "sre engineer", "sre lead",
+            "sre -", "- sre", "reliability engineer",
+        ],
         "resume_file": "resume_b64.txt",
         "cc_secret": "CC_SRE",
         "reply": SHARED_REPLY,
     },
 ]
 
+# All keywords combined for a single IMAP fetch pass
+ALL_KEYWORDS = [kw for role in ROLES for kw in role["keywords"]]
+
 REPLIED_LABEL = "AutoReplied"
-SKIP_SENDERS = ["noreply.github.com", "notifications@github.com", "github.com"]
+SKIP_SENDERS = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
 
 def connect_imap(your_email, app_password):
     mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -101,46 +116,76 @@ def mark_as_replied(mail, uid, your_email, app_password):
     log.error("  Failed to mark email as replied after 3 attempts")
     return mail
 
+def subject_matches(subject):
+    """Check subject line against all keywords in Python (case-insensitive)."""
+    s = subject.lower()
+    return any(kw in s for kw in ALL_KEYWORDS)
+
 def fetch_todays_matching_emails(your_email, app_password):
     log.info("Connecting to Gmail via IMAP...")
     mail = connect_imap(your_email, app_password)
     ensure_label_exists(mail)
     replied_ids = get_replied_message_ids(mail)
     log.info(f"Already replied to {len(replied_ids)} emails previously")
+
     today = datetime.now().strftime("%d-%b-%Y")
-    all_uid_set = set()
-    for role in ROLES:
-        for kw in role["keywords"]:
-            try:
-                _, msg_ids = mail.search(None, f'(UNSEEN SINCE "{today}" SUBJECT "{kw}")')
-                for uid in msg_ids[0].split(): all_uid_set.add(uid)
-            except Exception: pass
-    ids = list(all_uid_set)
-    log.info(f"Found {len(ids)} matching unread emails today")
+
+    # Fetch ALL unread emails from today in one IMAP call
+    _, msg_ids = mail.search(None, f'(UNSEEN SINCE "{today}")')
+    all_ids = msg_ids[0].split()
+    log.info(f"Found {len(all_ids)} total unread emails today")
+
     emails, seen_uids = [], set()
-    for i, uid in enumerate(ids):
+    for i, uid in enumerate(all_ids):
         uid_str = uid.decode()
         if uid_str in seen_uids: continue
         seen_uids.add(uid_str)
+
         if i > 0 and i % 10 == 0:
             try: mail.logout()
             except Exception: pass
             log.info(f"  Reconnecting IMAP at email {i}...")
             time.sleep(2)
             mail = connect_imap(your_email, app_password)
+
         try:
+            # Fetch only headers first to check subject (saves bandwidth)
+            _, hdr_data = mail.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
+            if not hdr_data or hdr_data[0] is None: continue
+            hdr_raw = hdr_data[0][1].decode("utf-8", errors="ignore")
+
+            # Parse subject from header
+            subj_match = re.search(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
+            subject = subj_match.group(1).strip().replace("\r\n", " ").replace("\n", " ") if subj_match else ""
+
+            # Skip if subject doesn't match any keyword
+            if not subject_matches(subject):
+                continue
+
+            # Parse message-id
+            mid_match = re.search(r"Message-ID:\s*(.+)", hdr_raw, re.IGNORECASE)
+            message_id = mid_match.group(1).strip() if mid_match else uid_str
+
+            if message_id in replied_ids:
+                log.info(f"  Already replied: {subject[:60]}")
+                continue
+
+            # Parse sender
+            sender_match = re.search(r"From:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
+            sender = sender_match.group(1).strip() if sender_match else ""
+
+            if any(skip in sender.lower() for skip in SKIP_SENDERS):
+                log.info(f"  Skipping notification: {subject[:60]}")
+                continue
+
+            # Parse reply-to
+            rt_match = re.search(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
+            reply_to = rt_match.group(1).strip() if rt_match else sender
+
+            # Now fetch full body only for matched emails
             _, msg_data = mail.fetch(uid, "(RFC822)")
             if not msg_data or msg_data[0] is None: continue
-            raw = msg_data[0][1]
-            msg = emaillib.message_from_bytes(raw)
-            message_id = msg.get("Message-ID", uid_str).strip()
-            if message_id in replied_ids:
-                log.info(f"  Already replied: {msg.get('Subject', '')[:60]}")
-                continue
-            sender = msg.get("From", "")
-            if any(skip in sender for skip in SKIP_SENDERS):
-                log.info(f"  Skipping notification: {msg.get('Subject', '')[:60]}")
-                continue
+            msg = emaillib.message_from_bytes(msg_data[0][1])
             body = ""
             if msg.is_multipart():
                 for part in msg.walk():
@@ -149,13 +194,20 @@ def fetch_todays_matching_emails(your_email, app_password):
                         break
             else:
                 body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-            emails.append({"uid": uid_str, "message_id": message_id,
-                "subject": msg.get("Subject", ""), "sender": msg.get("From", ""),
-                "reply_to": msg.get("Reply-To", msg.get("From", "")), "body": body[:4000]})
+
+            emails.append({
+                "uid": uid_str, "message_id": message_id,
+                "subject": subject, "sender": sender,
+                "reply_to": reply_to, "body": body[:4000]
+            })
+            log.info(f"  Queued: {subject[:60]}")
             time.sleep(0.3)
+
         except Exception as e:
             log.error(f"Error reading email {uid_str}: {e}")
             time.sleep(1)
+
+    log.info(f"Matched {len(emails)} emails to reply to")
     return emails, mail
 
 def detect_role(email):
@@ -164,7 +216,7 @@ def detect_role(email):
         if any(kw in subject for kw in role["keywords"]):
             log.info(f"  Matched: {role['name']}")
             return role
-    return None  # FIX 1: correct indentation, return None instead of defaulting to ROLES[0]
+    return None
 
 def extract_address(s):
     m = re.search(r"<(.+?)>", s)
@@ -234,7 +286,7 @@ def main():
         log.info(f"   From: {email['sender']}")
         try:
             role = detect_role(email)
-            if role is None:  # FIX 2: skip emails with no matching role
+            if role is None:
                 log.info("  No matching role — skipping")
                 continue
             matched += 1
