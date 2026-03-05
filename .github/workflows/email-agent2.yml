@@ -3,7 +3,7 @@ name: AI Email Agent - Malathi (Data Analyst)
 on:
   schedule:
     # Runs every 10 min between 6:30 PM - 4:30 AM IST (13:00 - 23:00 UTC)
-    - cron: '*/10 13-22 * * *'   # 6:30 PM to 4:29 AM IST
+    - cron: '*/10 13-22 * * *'    # 6:30 PM to 4:29 AM IST
     - cron: '0,10,20,30 23 * * *' # 4:30 AM IST cutoff (last 4 runs)
   workflow_dispatch:               # manual trigger anytime
 
@@ -20,10 +20,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --no-cache-dir -r requirements.txt
 
       - name: Run Email Agent - Malathi
         env:
