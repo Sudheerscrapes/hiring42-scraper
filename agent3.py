@@ -13,11 +13,12 @@ import imaplib
 import logging
 import email as emaillib
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time as dtime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+import pytz
 
 # ── Logging Setup ──────────────────────────────────────────────────────────────
 Path("logs").mkdir(exist_ok=True)
@@ -30,6 +31,17 @@ logging.basicConfig(
     ]
 )
 log = logging.getLogger(__name__)
+
+# ── TIME WINDOW CHECK (IST 6:30 PM → 4:30 AM) ─────────────────────────────────
+def is_within_run_window():
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+    current_time = now.time()
+    start = dtime(18, 30)  # 6:30 PM IST
+    end   = dtime(4, 30)   # 4:30 AM IST
+    # Window crosses midnight: >= 18:30 OR <= 04:30
+    return current_time >= start or current_time <= end
+# ──────────────────────────────────────────────────────────────────────────────
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 REPLIED_LABEL = "AutoReplied"
@@ -331,6 +343,13 @@ class EmailAgent:
         log.info("AI Email Agent - Manasa Janga (Senior Software Engineer)")
         log.info(f"Time: {datetime.now().isoformat()}")
         log.info("=" * 55)
+
+        # ── TIME WINDOW CHECK ────────────────────────────────────────────────
+        if not is_within_run_window():
+            log.info("⏰ Outside run window (6:30 PM - 4:30 AM IST). Skipping.")
+            return
+        log.info("✅ Within run window (6:30 PM - 4:30 AM IST). Proceeding...")
+        # ─────────────────────────────────────────────────────────────────────
 
         self.connect()
         emails  = self.fetch_matching_emails()
