@@ -13,11 +13,12 @@ import imaplib
 import logging
 import email as emaillib
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time as dtime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+import pytz
 
 # ── Logging Setup ──────────────────────────────────────────────────────────────
 Path("logs").mkdir(exist_ok=True)
@@ -30,6 +31,17 @@ logging.basicConfig(
     ]
 )
 log = logging.getLogger(__name__)
+
+# ── TIME WINDOW CHECK (IST 6:30 PM → 4:30 AM) ─────────────────────────────────
+def is_within_run_window():
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+    current_time = now.time()
+    start = dtime(18, 30)  # 6:30 PM IST
+    end   = dtime(4, 30)   # 4:30 AM IST
+    # Window crosses midnight: >= 18:30 OR <= 04:30
+    return current_time >= start or current_time <= end
+# ──────────────────────────────────────────────────────────────────────────────
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 REPLIED_LABEL = "AutoReplied"
@@ -186,7 +198,6 @@ class EmailAgent:
             return m.group(1).strip() if m else ""
 
         subject_raw = extract(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)").replace("\r\n", " ").replace("\n", " ")
-        # Decode encoded subjects like =?utf-8?B?...?= or =?iso-8859-1?Q?...?=
         from email.header import decode_header
         decoded_parts = decode_header(subject_raw)
         subject = ""
@@ -269,12 +280,10 @@ class EmailAgent:
 
     @staticmethod
     def load_resume() -> bytes:
-        # 1. Try environment variable first (GitHub Actions)
         b64_env = os.environ.get("RESUME_DATA_ENGINEER_B64", "")
         if b64_env.strip():
             log.info("  Resume: loaded from env variable")
             return base64.b64decode(re.sub(r'\s+', '', b64_env.strip()))
-        # 2. Fallback to file (local)
         path = Path(RESUME_FILE)
         if not path.exists():
             raise FileNotFoundError(f"Resume not found: set RESUME_DATA_ENGINEER_B64 env or place '{RESUME_FILE}' in folder")
@@ -344,10 +353,17 @@ class EmailAgent:
         log.info(f"Time: {datetime.now().isoformat()}")
         log.info("=" * 55)
 
+        # ── TIME WINDOW CHECK ────────────────────────────────────────────────
+        if not is_within_run_window():
+            log.info("⏰ Outside run window (6:30 PM - 4:30 AM IST). Skipping.")
+            return
+        log.info("✅ Within run window (6:30 PM - 4:30 AM IST). Proceeding...")
+        # ─────────────────────────────────────────────────────────────────────
+
         self.connect()
         emails  = self.fetch_matching_emails()
         matched = 0
-        sent_ids = set()  # prevent duplicate sends in same run
+        sent_ids = set()
 
         for email in emails:
             log.info(f"\nJOB EMAIL: {email['subject']}")
