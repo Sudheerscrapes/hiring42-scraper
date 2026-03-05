@@ -1,5 +1,4 @@
 name: AI Email Agent
-
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -32,7 +31,8 @@ jobs:
           RESUME_SAP_B64:      ${{ secrets.RESUME_SAP_B64 }}
           RESUME_DEFAULT_B64:  ${{ secrets.RESUME_DEFAULT_B64 }}
           CC_DEVOPS:           ${{ secrets.CC_DEVOPS }}
-          
+          CC_CLOUD:            ${{ secrets.CC_CLOUD }}
+          CC_SRE:              ${{ secrets.CC_SRE }}
           CC_DEFAULT:          ${{ secrets.CC_DEFAULT }}
         run: python agent.py
 
