@@ -151,6 +151,7 @@ def fetch_matching_emails(your_email, app_password):
             mail = connect_imap(your_email, app_password)
 
         try:
+            # BODY.PEEK — does not mark email as read
             _, hdr_data = mail.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
             if not hdr_data or hdr_data[0] is None: continue
             hdr_raw = hdr_data[0][1].decode("utf-8", errors="ignore")
@@ -175,6 +176,7 @@ def fetch_matching_emails(your_email, app_password):
             rt_match = re.search(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
             reply_to = rt_match.group(1).strip() if rt_match else sender
 
+            # BODY.PEEK[] — does not mark email as read
             _, msg_data = mail.fetch(uid, "(BODY.PEEK[])")
             if not msg_data or msg_data[0] is None: continue
             msg = emaillib.message_from_bytes(msg_data[0][1])
@@ -273,10 +275,14 @@ def main():
         return
     emails, mail = fetch_matching_emails(your_email, app_password)
     matched = 0
+    sent_ids = set()  # prevent duplicate sends in same run
     for email in emails:
         log.info(f"\nJOB EMAIL: {email['subject']}")
         log.info(f"   From: {email['sender']}")
         try:
+            if email["message_id"] in sent_ids:
+                log.info("  Duplicate in this run — skipping")
+                continue
             role = detect_role(email)
             if role is None:
                 log.info("  No matching role — skipping")
@@ -285,6 +291,7 @@ def main():
             send_reply(email, role, your_email, app_password)
             log_sent(email, role)
             mail = mark_as_replied(mail, email["uid"], your_email, app_password)
+            sent_ids.add(email["message_id"])
         except Exception as e:
             log.error(f"Error: {e}", exc_info=True)
     try: mail.logout()
