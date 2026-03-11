@@ -1,6 +1,6 @@
 """
 AI Email Agent - Manasa Janga
-Only replies to: Frontend / Software Engineer roles
+Only replies to: Frontend / Software Engineer roles (Florida or Remote only)
 Searches Gmail by keyword in subject - today only
 """
 
@@ -48,6 +48,13 @@ REPLIED_LABEL = "AutoReplied"
 RESUME_FILE   = "resume_manasa_b64.txt"
 RESUME_NAME   = "Resume_Manasa_Janga.docx"
 SKIP_SENDERS  = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
+
+# ── Location Filter ────────────────────────────────────────────────────────────
+ALLOWED_LOCATIONS = ["florida", "remote", "fl,", " fl ", "(fl)"]
+
+def is_allowed_location(subject: str, body: str) -> bool:
+    combined = (subject + " " + body).lower()
+    return any(loc in combined for loc in ALLOWED_LOCATIONS)
 
 REPLY_BODY = """Hi,
 
@@ -259,10 +266,16 @@ class EmailAgent:
     @staticmethod
     def detect_role(email: dict) -> dict | None:
         subject = email["subject"].lower()
+        body    = email.get("body", "").lower()
+
         for role in ROLES:
             if any(kw in subject for kw in role["keywords"]):
-                log.info(f"  Matched: {role['name']}")
-                return role
+                if is_allowed_location(subject, body):
+                    log.info(f"  Matched: {role['name']} (Florida or Remote)")
+                    return role
+                else:
+                    log.info(f"  Skipping (not Florida/Remote): {subject[:60]}")
+                    return None
         return None
 
     # ── Resume Loading ─────────────────────────────────────────────────────────
@@ -361,7 +374,7 @@ class EmailAgent:
             try:
                 role = self.detect_role(email)
                 if role is None:
-                    log.info("  No matching role — skipping")
+                    log.info("  No matching role or location — skipping")
                     continue
                 matched += 1
                 self.send_reply(email, role)
@@ -375,7 +388,7 @@ class EmailAgent:
         except Exception:
             pass
 
-        log.info(f"\nDone - Replied to {matched} Software Engineer emails")
+        log.info(f"\nDone - Replied to {matched} Software Engineer emails (Florida/Remote only)")
         log.info("Cost: 0.00")
 
 
