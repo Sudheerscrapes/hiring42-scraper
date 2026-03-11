@@ -67,6 +67,15 @@ BLOCKED_ROLES = [
     "power bi consultant", "power bi developer", "power bi analyst",
     "power bi architect", "senior power bi", "lead power bi",
     "power bi engineer", "power bi specialist",
+    # Other unrelated SAP/non-SAP roles
+    "sap rar", "sap revenue accounting",
+    "workforce software", "workforce management",
+    "hotlist", "available consultants", "bench consultants",
+    "sap fico", "sap fi consultant", "sap co consultant",
+    "sap mm", "sap pp", "sap wm", "sap pm",
+    "sap successfactors", "sap hcm", "sap hr",
+    "sap ariba", "sap mdg", "sap ewm",
+    "sap tm consultant", "sap apo",
 ]
 
 def is_blocked_role(subject: str) -> bool:
@@ -167,8 +176,8 @@ ROLES = [
 # ── Body Keywords — search email body for these SAP-specific terms ─────────────
 BODY_KEYWORDS = [
     "sap analytics cloud", "sap sac", "sac consultant", "sac planning",
-    "sap datasphere", "datasphere", "sap bdc",
-    "sap analytics", "sap bw", "sap bi", "sap hana",
+    "sap datasphere", "datasphere consultant", "sap bdc",
+    "sap bw consultant", "sap bw developer", "bw/4hana",
     "sap businessobjects", "sap bobj",
 ]
 
