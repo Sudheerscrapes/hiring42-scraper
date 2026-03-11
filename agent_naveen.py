@@ -49,6 +49,27 @@ RESUME_FILE   = "resume_naveen_sap_sd_b64.txt"
 RESUME_NAME   = "Resume_Naveen_SAP_SD.docx"
 SKIP_SENDERS  = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
 
+# ── Role Blocklist — skip emails mentioning these roles even if SAP SD keyword matches ──
+BLOCKED_ROLES = [
+    "project manager", "program manager", "product manager",
+    "sap manager", "engagement manager", "delivery manager",
+    "account manager", "practice manager", "service manager",
+    "scrum master", "agile coach",
+    "sap director", "director of sap",
+    "sap architect", "solution architect", "enterprise architect",
+    "sap abap", "abap developer", "abap consultant",
+    "sap basis", "basis consultant", "basis administrator",
+    "sap fico", "sap fi consultant", "sap co consultant",
+    "sap mm consultant", "sap wm consultant", "sap pp consultant",
+    "sap hcm", "sap hr consultant", "sap successfactors",
+    "sap crm", "sap ariba", "sap mdg",
+    "sap technical", "sap developer",
+]
+
+def is_blocked_role(subject: str) -> bool:
+    subject_lower = subject.lower()
+    return any(blocked in subject_lower for blocked in BLOCKED_ROLES)
+
 REPLY_BODY = """Hi,
 
 I hope you're doing well. I'm writing to express my interest in the SAP SD opportunity.
@@ -283,6 +304,12 @@ class EmailAgent:
     @staticmethod
     def detect_role(email: dict) -> dict | None:
         subject = email["subject"].lower()
+
+        # First check blocklist — skip unwanted roles
+        if is_blocked_role(subject):
+            log.info(f"  Blocked role detected — skipping: {subject[:60]}")
+            return None
+
         for role in ROLES:
             if any(kw in subject for kw in role["keywords"]):
                 log.info(f"  Matched: {role['name']}")
