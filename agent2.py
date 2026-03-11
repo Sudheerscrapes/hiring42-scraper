@@ -1,6 +1,6 @@
 """
 AI Email Agent - Malathi Gambiraopet
-Only replies to: Data Analyst roles
+Only replies to: Data Analyst roles (Delaware or Remote only)
 Searches Gmail by keyword in subject - today only
 """
 
@@ -48,6 +48,13 @@ REPLIED_LABEL = "AutoReplied"
 RESUME_FILE   = "resume_data_analyst_b64.txt"
 RESUME_NAME   = "Resume_Malathi_Gambiraopet.docx"
 SKIP_SENDERS  = ["noreply@", "mailer-daemon@", "notifications@github.com", "noreply.github.com"]
+
+# ── Location Filter ────────────────────────────────────────────────────────────
+ALLOWED_LOCATIONS = ["delaware", "remote", "de,", " de ", "(de)"]
+
+def is_allowed_location(subject: str, body: str) -> bool:
+    combined = (subject + " " + body).lower()
+    return any(loc in combined for loc in ALLOWED_LOCATIONS)
 
 REPLY_BODY = """Hi,
 
@@ -262,10 +269,16 @@ class EmailAgent:
     @staticmethod
     def detect_role(email: dict) -> dict | None:
         subject = email["subject"].lower()
+        body    = email.get("body", "").lower()
+
         for role in ROLES:
             if any(kw in subject for kw in role["keywords"]):
-                log.info(f"  Matched: {role['name']}")
-                return role
+                if is_allowed_location(subject, body):
+                    log.info(f"  Matched: {role['name']} (Delaware or Remote)")
+                    return role
+                else:
+                    log.info(f"  Skipping (not Delaware/Remote): {subject[:60]}")
+                    return None
         return None
 
     # ── Resume Loading ─────────────────────────────────────────────────────────
@@ -364,7 +377,7 @@ class EmailAgent:
             try:
                 role = self.detect_role(email)
                 if role is None:
-                    log.info("  No matching role — skipping")
+                    log.info("  No matching role or location — skipping")
                     continue
                 matched += 1
                 self.send_reply(email, role)
@@ -378,7 +391,7 @@ class EmailAgent:
         except Exception:
             pass
 
-        log.info(f"\nDone - Replied to {matched} Data Analyst emails")
+        log.info(f"\nDone - Replied to {matched} Data Analyst emails (Delaware/Remote only)")
         log.info("Cost: 0.00")
 
 
