@@ -14,11 +14,11 @@ import os
 import sys
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
-YOUR_EMAIL       = os.environ.get("YOUR_EMAIL", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
-DAILY_LIMIT      = 500   # Gmail free account limit
-SAFE_LIMIT       = 450   # We stop here to stay safe
-LABEL            = "AutoReplied"  # The label your agent uses to mark replied emails
+YOUR_EMAIL         = os.environ.get("IMAP_EMAIL", "")
+GMAIL_APP_PASSWORD = os.environ.get("IMAP_APP_PASSWORD", "")
+DAILY_LIMIT        = 500   # Gmail free account limit
+SAFE_LIMIT         = 450   # We stop here to stay safe
+LABEL              = "AutoReplied"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -33,15 +33,13 @@ def connect_imap(email_addr, password):
 def count_today_sent(mail):
     """Count emails in AutoReplied label that were sent today."""
     today = date.today()
-    today_str = today.strftime("%d-%b-%Y")  # e.g. 05-Mar-2026
+    today_str = today.strftime("%d-%b-%Y")
 
-    # Select the AutoReplied label
     status, _ = mail.select(f'"{LABEL}"')
     if status != "OK":
         print(f"❌ Could not find label '{LABEL}'. Make sure your agent has created it.")
         return 0
 
-    # Search for emails since today
     status, messages = mail.search(None, f'(SINCE "{today_str}")')
     if status != "OK":
         print("❌ Search failed.")
@@ -102,8 +100,8 @@ def main():
     if not YOUR_EMAIL or not GMAIL_APP_PASSWORD:
         print("❌ Missing credentials!")
         print("   Set environment variables:")
-        print("   export YOUR_EMAIL='you@gmail.com'")
-        print("   export GMAIL_APP_PASSWORD='your-app-password'")
+        print("   export IMAP_EMAIL='you@gmail.com'")
+        print("   export IMAP_APP_PASSWORD='your-app-password'")
         sys.exit(1)
 
     mail = connect_imap(YOUR_EMAIL, GMAIL_APP_PASSWORD)

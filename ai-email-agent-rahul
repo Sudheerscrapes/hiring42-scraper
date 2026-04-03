@@ -1,15 +1,17 @@
 """
-AI Email Agent - Lingaraju Modhala - FINAL VERSION
-Only replies to: DevOps, Cloud Engineer, SRE
+AI Email Agent - Rahul (Data Engineer)
+Scans: sudheeritservices1@gmail.com (IMAP)
+Sends: harshithacloud81@gmail.com (SMTP)
+Replies to: Data Engineer, Data Analyst, ETL/Pipeline Engineer, BI Engineer
 
-FIXES:
+FIXES (inherited from original):
 1. Dedup checked FIRST before anything else
 2. Dedup saved IMMEDIATELY after each send (not at the end)
 3. UTF-8-sig fix for dedup file (BOM handling)
-4. Skips own sent emails (sudheeritservices1 / rajumodhala777)
+4. Skips own sent emails (sudheeritservices1 / harshithacloud81)
 5. Skips any email with subject starting with "Re:"
 6. SCAN from sudheeritservices1@gmail.com
-7. SEND from rajumodhala777@gmail.com
+7. SEND from harshithacloud81@gmail.com
 8. Daily send cap (450) to avoid Gmail 550 limit errors
 9. SINGLE SMTP connection reused for all emails (avoids Google block)
 10. 5 second delay between sends (avoids spam detection)
@@ -28,13 +30,13 @@ import pytz
 
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("logs/agent.log"), logging.StreamHandler()])
+    handlers=[logging.FileHandler("logs/agent_rahul.log"), logging.StreamHandler()])
 log = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 📅 DAILY DEDUP - Resets every day at midnight
 # ══════════════════════════════════════════════════════════════════════════════
-DEDUP_FILE = Path("logs") / "daily_replied_senders.json"
+DEDUP_FILE = Path("logs") / "daily_replied_senders_rahul.json"
 MAX_DAILY_SENDS = 450  # Gmail hard limit is 500 — stay safely under it
 
 def get_today_date():
@@ -93,54 +95,72 @@ SHARED_REPLY = """Hi,
 
 I hope you're doing well. I'm writing to express my interest in any suitable opportunities that match my background and experience.
 
-I have several years of experience working in cloud, DevOps, and production support environments. My work has involved supporting live systems, automating deployments, improving monitoring and reliability, and collaborating closely with cross-functional teams to keep applications stable and performant.
+I have several years of experience working as a Data Engineer, with strong expertise in designing and building scalable data pipelines, ETL workflows, and cloud-based data solutions. My work has involved working with large datasets, optimizing data processing, building data warehouses, and collaborating with analytics and business teams to deliver data-driven insights.
 
 I've attached my resume for your review. I'd appreciate the opportunity to connect and discuss how my skills could be a good fit for your team.
 
 Thank you for your time and consideration.
 
 Best regards,
-Lingaraju Modhala
-Phone: +1 940 281 5324
-Email: rajumodhala777@gmail.com"""
+Rahul
+Phone: +1 216-336-9198
+Email: rahulkumargunti4@gmail.com"""
 
 ROLES = [
     {
-        "name": "DevOps Engineer",
+        "name": "Data Engineer",
         "keywords": [
-            "devops", "dev ops", "ci/cd", "build and release",
-            "devsecops", "release engineer", "pipeline engineer",
-            "infrastructure engineer", "platform engineer",
+            "data engineer", "data engineering", "big data engineer",
+            "data platform engineer", "data infrastructure engineer",
+            "data pipeline engineer", "etl engineer", "elt engineer",
+            "spark engineer", "hadoop engineer", "kafka engineer",
+            "databricks engineer", "snowflake engineer",
         ],
-        "resume_file": "resume_b64.txt",
-        "cc_secret": "CC_DEVOPS",
+        "resume_file": "resume_rahul_b64.txt",
+        "cc_secret": "CC_DATA_ENGINEER",
         "reply": SHARED_REPLY,
     },
     {
-        "name": "Cloud Engineer",
+        "name": "Data Analyst",
         "keywords": [
-            "cloud engineer", "cloud architect", "cloud infrastructure",
-            "aws engineer", "aws architect", "aws devops",
-            "azure engineer", "azure architect", "azure devops",
-            "gcp engineer", "gcp architect",
+            "data analyst", "business analyst", "analytics engineer",
+            "bi analyst", "business intelligence analyst",
+            "reporting analyst", "sql analyst",
+            "data and analytics", "insights analyst",
         ],
-        "resume_file": "resume_b64.txt",
-        "cc_secret": "CC_CLOUD",
+        "resume_file": "resume_rahul_b64.txt",
+        "cc_secret": "CC_DATA_ANALYST",
         "reply": SHARED_REPLY,
     },
     {
-        "name": "Site Reliability Engineer",
+        "name": "ETL / Pipeline Engineer",
         "keywords": [
-            "site reliability", "sre engineer", "sre lead",
-            "sre -", "- sre", "reliability engineer",
+            "etl developer", "etl pipeline", "data pipeline",
+            "pipeline developer", "data integration engineer",
+            "data integration developer", "informatica", "talend",
+            "dbt engineer", "dbt developer",
         ],
-        "resume_file": "resume_b64.txt",
-        "cc_secret": "CC_SRE",
+        "resume_file": "resume_rahul_b64.txt",
+        "cc_secret": "CC_ETL",
+        "reply": SHARED_REPLY,
+    },
+    {
+        "name": "BI / Cloud Data Engineer",
+        "keywords": [
+            "bi engineer", "bi developer", "power bi developer",
+            "tableau developer", "cloud data engineer",
+            "aws data engineer", "azure data engineer",
+            "gcp data engineer", "cloud data architect",
+            "data warehouse engineer", "data warehouse developer",
+            "redshift engineer", "azure synapse", "google bigquery",
+        ],
+        "resume_file": "resume_rahul_b64.txt",
+        "cc_secret": "CC_BI_CLOUD",
         "reply": SHARED_REPLY,
     },
 ]
 
-REPLIED_LABEL = "AutoReplied"
+REPLIED_LABEL = "AutoReplied_Rahul"
 
 # Skip own email addresses + system senders
 SKIP_SENDERS = [
@@ -149,7 +169,7 @@ SKIP_SENDERS = [
     "notifications@github.com",
     "noreply.github.com",
     "sudheeritservices1@gmail.com",   # own IMAP scan account
-    "rajumodhala777@gmail.com",        # own SMTP send account
+    "harshithacloud81@gmail.com",      # own SMTP send account
 ]
 
 def extract_address(s):
@@ -205,7 +225,7 @@ def fetch_matching_emails():
     mail = connect_imap()
     ensure_label_exists(mail)
     replied_ids = get_replied_message_ids(mail)
-    log.info(f"Gmail AutoReplied label: {len(replied_ids)} emails")
+    log.info(f"Gmail {REPLIED_LABEL} label: {len(replied_ids)} emails")
 
     replied_senders, send_count = load_daily_dedup()
 
@@ -312,7 +332,7 @@ def get_resume(role):
 
 def send_reply(email, role, server):
     """Send reply using an already-connected SMTP server (no new login)."""
-    smtp_email = os.environ["SMTP_EMAIL"]  # rajumodhala777@gmail.com
+    smtp_email = os.environ["SMTP_EMAIL"]  # harshithacloud81@gmail.com
     to_email = extract_address(email["reply_to"] or email["sender"])
     cc_email = os.environ.get(role["cc_secret"], "")
 
@@ -330,7 +350,7 @@ def send_reply(email, role, server):
     part = MIMEBase("application", "vnd.openxmlformats-officedocument.wordprocessingml.document")
     part.set_payload(resume_bytes)
     encoders.encode_base64(part)
-    part.add_header("Content-Disposition", 'attachment; filename="Resume_Lingaraju_Modhala.docx"')
+    part.add_header("Content-Disposition", 'attachment; filename="Resume_Rahul_DataEngineer.docx"')
     msg.attach(part)
 
     recipients = [to_email]
@@ -347,7 +367,7 @@ def send_reply(email, role, server):
     time.sleep(5)
 
 def log_sent(email, role):
-    csv_path = "logs/sent_log.csv"
+    csv_path = "logs/sent_log_rahul.csv"
     is_new = not os.path.exists(csv_path)
     with open(csv_path, "a") as f:
         if is_new: f.write("timestamp,role,sender,subject,cc\n")
@@ -356,9 +376,9 @@ def log_sent(email, role):
 
 def main():
     log.info("=" * 70)
-    log.info("AI Email Agent - Lingaraju Modhala (FINAL VERSION)")
+    log.info("AI Email Agent - Rahul (Data Engineer) ")
     log.info(f"SCAN inbox : sudheeritservices1@gmail.com (IMAP_EMAIL)")
-    log.info(f"SEND from  : rajumodhala777@gmail.com (SMTP_EMAIL)")
+    log.info(f"SEND from  : harshithacloud81@gmail.com (SMTP_EMAIL)")
     log.info(f"Time       : {datetime.now().isoformat()}")
     log.info("=" * 70)
 

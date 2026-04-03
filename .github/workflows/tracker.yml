@@ -1,25 +1,44 @@
-name: Daily Send Tracker
-
+name: AI Email Agent
 on:
-  workflow_dispatch:  # Run manually from Actions tab
   schedule:
-    - cron: '0 */6 * * *'  # Also runs every 6 hours automatically
-
+    - cron: '*/15 13-22 * * *'
+    - cron: '0,15,30 23 * * *'
+  workflow_dispatch:
 jobs:
-  track:
+  run-agent:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Run Daily Tracker
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+      - name: Run Email Agent
         env:
-          YOUR_EMAIL: ${{ secrets.YOUR_EMAIL }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          IMAP_EMAIL:          ${{ secrets.IMAP_EMAIL }}
+          IMAP_APP_PASSWORD:   ${{ secrets.IMAP_APP_PASSWORD }}
+          SMTP_EMAIL:          ${{ secrets.SMTP_EMAIL }}
+          SMTP_APP_PASSWORD:   ${{ secrets.SMTP_APP_PASSWORD }}
+          RESUME_DEVOPS_B64:   ${{ secrets.RESUME_DEVOPS_B64 }}
+          RESUME_DEFAULT_B64:  ${{ secrets.RESUME_DEFAULT_B64 }}
+          CC_DEVOPS:           ${{ secrets.CC_DEVOPS }}
+          CC_CLOUD:            ${{ secrets.CC_CLOUD }}
+          CC_SRE:              ${{ secrets.CC_SRE }}
+        run: python agent.py
+      - name: Track daily sends
+        if: always()
+        env:
+          IMAP_EMAIL:        ${{ secrets.IMAP_EMAIL }}
+          IMAP_APP_PASSWORD: ${{ secrets.IMAP_APP_PASSWORD }}
         run: python daily_tracker.py
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 30

@@ -1,43 +1,35 @@
 name: AI Email Agent
-
 on:
   schedule:
     # Runs every 15 min between 6:30 PM - 4:30 AM IST (13:00 - 23:00 UTC)
     - cron: '*/15 13-22 * * *'   # 6:30 PM to 4:29 AM IST
     - cron: '0,15,30 23 * * *'   # 4:30 AM IST cutoff (last 3 runs)
   workflow_dispatch:
-
 jobs:
   run-agent:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install --no-cache-dir -r requirements.txt
-
       - name: Run Email Agent
         env:
-          YOUR_NAME:           ${{ secrets.YOUR_NAME }}
-          YOUR_EMAIL:          ${{ secrets.YOUR_EMAIL }}
-          GMAIL_APP_PASSWORD:  ${{ secrets.GMAIL_APP_PASSWORD }}
+          IMAP_EMAIL:          ${{ secrets.IMAP_EMAIL }}
+          IMAP_APP_PASSWORD:   ${{ secrets.IMAP_APP_PASSWORD }}
+          SMTP_EMAIL:          ${{ secrets.SMTP_EMAIL }}
+          SMTP_APP_PASSWORD:   ${{ secrets.SMTP_APP_PASSWORD }}
           RESUME_DEVOPS_B64:   ${{ secrets.RESUME_DEVOPS_B64 }}
-          RESUME_SAP_B64:      ${{ secrets.RESUME_SAP_B64 }}
           RESUME_DEFAULT_B64:  ${{ secrets.RESUME_DEFAULT_B64 }}
           CC_DEVOPS:           ${{ secrets.CC_DEVOPS }}
           CC_CLOUD:            ${{ secrets.CC_CLOUD }}
           CC_SRE:              ${{ secrets.CC_SRE }}
-          CC_DEFAULT:          ${{ secrets.CC_DEFAULT }}
         run: python agent.py
-
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
