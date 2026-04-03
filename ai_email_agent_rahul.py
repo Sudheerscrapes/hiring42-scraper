@@ -34,59 +34,56 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 📅 DAILY DEDUP - Resets every day at midnight
+# DAILY DEDUP - Resets every day at midnight
 # ══════════════════════════════════════════════════════════════════════════════
 DEDUP_FILE = Path("logs") / "daily_replied_senders_rahul.json"
-MAX_DAILY_SENDS = 450  # Gmail hard limit is 500 — stay safely under it
+MAX_DAILY_SENDS = 450
 
 def get_today_date():
     return str(date.today())
 
 def load_daily_dedup():
-    """Load today's replied senders and send count. If file is from different day, reset."""
     if DEDUP_FILE.exists():
         try:
-            with open(DEDUP_FILE, "r", encoding="utf-8-sig") as f:  # handles BOM
+            with open(DEDUP_FILE, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
                 file_date = data.get("date", "")
                 today = get_today_date()
                 if file_date == today:
                     senders = set(data.get("senders", []))
                     send_count = data.get("send_count", 0)
-                    log.info(f"📅 TODAY ({today}): {len(senders)} senders, {send_count}/{MAX_DAILY_SENDS} sent so far")
+                    log.info("TODAY (%s): %d senders, %d/%d sent so far", today, len(senders), send_count, MAX_DAILY_SENDS)
                     return senders, send_count
                 else:
-                    log.info(f"📅 NEW DAY! (was {file_date}, now {today}) - Resetting dedup")
+                    log.info("NEW DAY! (was %s, now %s) - Resetting dedup", file_date, today)
                     return set(), 0
         except Exception as e:
-            log.warning(f"⚠️ Could not load dedup file: {e}")
-
-    log.info(f"📅 TODAY ({get_today_date()}): No dedup file yet - starting fresh")
+            log.warning("Could not load dedup file: %s", e)
+    log.info("TODAY (%s): No dedup file yet - starting fresh", get_today_date())
     return set(), 0
 
 def save_daily_dedup(senders, send_count=0):
-    """Save today's replied senders and send count."""
     data = {
         "date": get_today_date(),
         "senders": sorted(list(senders)),
         "send_count": send_count
     }
     try:
-        with open(DEDUP_FILE, "w", encoding="utf-8") as f:  # plain utf-8, no BOM
+        with open(DEDUP_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        log.info(f"✅ SAVED TO DEDUP: {len(senders)} senders, {send_count}/{MAX_DAILY_SENDS} sent today")
+        log.info("SAVED TO DEDUP: %d senders, %d/%d sent today", len(senders), send_count, MAX_DAILY_SENDS)
     except Exception as e:
-        log.error(f"❌ Could not save dedup file: {e}")
+        log.error("Could not save dedup file: %s", e)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ⏰ TIME WINDOW CHECK
+# TIME WINDOW CHECK
 # ══════════════════════════════════════════════════════════════════════════════
 def is_within_run_window():
     ist = pytz.timezone("Asia/Kolkata")
     now = datetime.now(ist)
     current_time = now.time()
     start = dtime(18, 30)
-    end   = dtime(4, 30)
+    end = dtime(4, 30)
     return current_time >= start or current_time <= end
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -162,14 +159,13 @@ ROLES = [
 
 REPLIED_LABEL = "AutoReplied_Rahul"
 
-# Skip own email addresses + system senders
 SKIP_SENDERS = [
     "noreply@",
     "mailer-daemon@",
     "notifications@github.com",
     "noreply.github.com",
-    "sudheeritservices1@gmail.com",   # own IMAP scan account
-    "harshithacloud81@gmail.com",      # own SMTP send account
+    "sudheeritservices1@gmail.com",
+    "harshithacloud81@gmail.com",
 ]
 
 def extract_address(s):
@@ -179,15 +175,16 @@ def extract_address(s):
     return (m.group(1) if m else s).strip().lower()
 
 def connect_imap():
-    """Connect using IMAP credentials (sudheeritservices1)."""
     mail = imaplib.IMAP4_SSL("imap.gmail.com")
     mail.login(os.environ["IMAP_EMAIL"], os.environ["IMAP_APP_PASSWORD"])
     mail.select("inbox")
     return mail
 
 def ensure_label_exists(mail):
-    try: mail.create(REPLIED_LABEL)
-    except Exception: pass
+    try:
+        mail.create(REPLIED_LABEL)
+    except Exception:
+        pass
 
 def get_replied_message_ids(mail):
     replied_ids = set()
@@ -201,8 +198,10 @@ def get_replied_message_ids(mail):
                 if isinstance(item, tuple):
                     raw = item[1].decode("utf-8", errors="ignore")
                     m = re.search(r"Message-ID:\s*(.+)", raw, re.IGNORECASE)
-                    if m: replied_ids.add(m.group(1).strip())
-    except Exception: pass
+                    if m:
+                        replied_ids.add(m.group(1).strip())
+    except Exception:
+        pass
     mail.select("inbox")
     return replied_ids
 
@@ -215,9 +214,9 @@ def mark_as_replied(mail, uid):
             fresh.logout()
             return mail
         except Exception as e:
-            log.warning(f"  Mark attempt {attempt+1} failed: {e}")
+            log.warning("Mark attempt %d failed: %s", attempt + 1, e)
             time.sleep(2)
-    log.error("  Failed to mark email as replied after 3 attempts")
+    log.error("Failed to mark email as replied after 3 attempts")
     return mail
 
 def fetch_matching_emails():
@@ -225,49 +224,52 @@ def fetch_matching_emails():
     mail = connect_imap()
     ensure_label_exists(mail)
     replied_ids = get_replied_message_ids(mail)
-    log.info(f"Gmail {REPLIED_LABEL} label: {len(replied_ids)} emails")
+    log.info("Gmail %s label: %d emails", REPLIED_LABEL, len(replied_ids))
 
     replied_senders, send_count = load_daily_dedup()
-
     today = datetime.now().strftime("%d-%b-%Y")
 
     all_uid_set = set()
     for role in ROLES:
         for kw in role["keywords"]:
             try:
-                _, msg_ids = mail.search(None, f'(UNSEEN SINCE "{today}" SUBJECT "{kw}")')
+                search_str = '(UNSEEN SINCE "' + today + '" SUBJECT "' + kw + '")'
+                _, msg_ids = mail.search(None, search_str)
                 for uid in msg_ids[0].split():
                     all_uid_set.add(uid)
             except Exception:
                 pass
 
     ids = list(all_uid_set)
-    log.info(f"Found {len(ids)} matching unread emails today")
+    log.info("Found %d matching unread emails today", len(ids))
 
     emails, seen_uids = [], set()
     for i, uid in enumerate(ids):
         uid_str = uid.decode()
-        if uid_str in seen_uids: continue
+        if uid_str in seen_uids:
+            continue
         seen_uids.add(uid_str)
 
         if i > 0 and i % 50 == 0:
-            try: mail.logout()
-            except Exception: pass
-            log.info(f"  Reconnecting IMAP at email {i}...")
+            try:
+                mail.logout()
+            except Exception:
+                pass
+            log.info("Reconnecting IMAP at email %d...", i)
             time.sleep(1)
             mail = connect_imap()
 
         try:
             _, hdr_data = mail.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])")
-            if not hdr_data or hdr_data[0] is None: continue
+            if not hdr_data or hdr_data[0] is None:
+                continue
             hdr_raw = hdr_data[0][1].decode("utf-8", errors="ignore")
 
             subj_match = re.search(r"Subject:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
             subject = subj_match.group(1).strip().replace("\r\n", " ").replace("\n", " ") if subj_match else ""
 
-            # Skip own reply threads — subjects starting with "Re:"
             if subject.lower().startswith("re:"):
-                log.info(f"  Skipping — own reply thread: {subject[:50]}")
+                log.info("Skipping - own reply thread: %s", subject[:50])
                 continue
 
             mid_match = re.search(r"Message-ID:\s*(.+)", hdr_raw, re.IGNORECASE)
@@ -279,18 +281,17 @@ def fetch_matching_emails():
             rt_match = re.search(r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)", hdr_raw, re.IGNORECASE | re.DOTALL)
             reply_to = rt_match.group(1).strip() if rt_match else sender
 
-            # Skip own email addresses and system senders
             if any(skip in sender.lower() for skip in SKIP_SENDERS):
-                log.info(f"  Skipping sender: {subject[:50]}")
+                log.info("Skipping sender: %s", subject[:50])
                 continue
 
             if message_id in replied_ids:
-                log.info(f"  Already replied (Message-ID): {subject[:50]}")
+                log.info("Already replied (Message-ID): %s", subject[:50])
                 continue
 
             sender_addr = extract_address(reply_to or sender)
             if not sender_addr:
-                log.warning(f"  Could not extract sender email from: {sender}")
+                log.warning("Could not extract sender email from: %s", sender)
                 continue
 
             emails.append({
@@ -301,28 +302,29 @@ def fetch_matching_emails():
                 "reply_to": reply_to,
                 "sender_addr": sender_addr
             })
-            log.info(f"  Queued: {subject[:50]} from {sender_addr}")
+            log.info("Queued: %s from %s", subject[:50], sender_addr)
             time.sleep(0.2)
 
         except Exception as e:
-            log.error(f"Error reading email {uid_str}: {e}")
+            log.error("Error reading email %s: %s", uid_str, e)
             time.sleep(1)
 
-    log.info(f"Ready to process {len(emails)} emails")
+    log.info("Ready to process %d emails", len(emails))
     return emails, mail, replied_senders, send_count
 
 def detect_role(email):
     subject = email["subject"].lower()
     for role in ROLES:
         if any(kw in subject for kw in role["keywords"]):
-            log.info(f"  Matched: {role['name']}")
+            log.info("Matched: %s", role["name"])
             return role
     return None
 
 def get_resume(role):
     fname = role["resume_file"]
-    if not Path(fname).exists(): raise ValueError(f"Resume file '{fname}' not found!")
-    log.info(f"  Resume: {fname}")
+    if not Path(fname).exists():
+        raise ValueError("Resume file '{}' not found!".format(fname))
+    log.info("Resume: %s", fname)
     raw = Path(fname).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         b64 = re.sub(r'\s+', '', raw.decode('utf-16').strip())
@@ -331,18 +333,21 @@ def get_resume(role):
     return base64.b64decode(b64)
 
 def send_reply(email, role, server):
-    """Send reply using an already-connected SMTP server (no new login)."""
-    smtp_email = os.environ["RAHUL_SMTP_EMAIL"]  # harshithacloud81@gmail.com
+    smtp_email = os.environ["RAHUL_SMTP_EMAIL"]
     to_email = extract_address(email["reply_to"] or email["sender"])
     cc_email = os.environ.get(role["cc_secret"], "")
 
-    subject = f"Re: {email['subject']}" if not email["subject"].lower().startswith("re:") else email["subject"]
+    if not email["subject"].lower().startswith("re:"):
+        subject = "Re: " + email["subject"]
+    else:
+        subject = email["subject"]
 
     msg = MIMEMultipart()
     msg["From"] = smtp_email
     msg["To"] = to_email
     msg["Subject"] = subject
-    if cc_email: msg["Cc"] = cc_email
+    if cc_email:
+        msg["Cc"] = cc_email
 
     msg.attach(MIMEText(role["reply"], "plain"))
 
@@ -354,32 +359,39 @@ def send_reply(email, role, server):
     msg.attach(part)
 
     recipients = [to_email]
-    if cc_email: recipients.append(cc_email)
+    if cc_email:
+        recipients.append(cc_email)
 
-    # Use existing SMTP connection — no new login
     server.sendmail(smtp_email, recipients, msg.as_string())
 
-    log.info(f"  Sent from : {smtp_email}")
-    log.info(f"  Sent to   : {to_email}")
-    if cc_email: log.info(f"  CC'd      : {cc_email}")
+    log.info("Sent from : %s", smtp_email)
+    log.info("Sent to   : %s", to_email)
+    if cc_email:
+        log.info("CCd       : %s", cc_email)
 
-    # 5 second delay between sends to avoid Google spam detection
     time.sleep(5)
 
 def log_sent(email, role):
     csv_path = "logs/sent_log_rahul.csv"
     is_new = not os.path.exists(csv_path)
     with open(csv_path, "a") as f:
-        if is_new: f.write("timestamp,role,sender,subject,cc\n")
+        if is_new:
+            f.write("timestamp,role,sender,subject,cc\n")
         cc = os.environ.get(role["cc_secret"], "none")
-        f.write(f'{datetime.now().isoformat()},"{role["name"]}","{email["sender"]}","{email["subject"]}","{cc}"\n')
+        f.write('{},"{}", "{}","{}","{}"\n'.format(
+            datetime.now().isoformat(),
+            role["name"],
+            email["sender"],
+            email["subject"],
+            cc
+        ))
 
 def main():
     log.info("=" * 70)
-    log.info("AI Email Agent - Rahul (Data Engineer) ")
-    log.info(f"SCAN inbox : sudheeritservices1@gmail.com (IMAP_EMAIL)")
-    log.info(f"SEND from  : harshithacloud81@gmail.com (SMTP_EMAIL)")
-    log.info(f"Time       : {datetime.now().isoformat()}")
+    log.info("AI Email Agent - Rahul (Data Engineer)")
+    log.info("SCAN inbox : sudheeritservices1@gmail.com")
+    log.info("SEND from  : harshithacloud81@gmail.com")
+    log.info("Time       : %s", datetime.now().isoformat())
     log.info("=" * 70)
 
     if not is_within_run_window():
@@ -387,72 +399,68 @@ def main():
         return
     log.info("Within run window (6:30 PM - 4:30 AM IST). Proceeding...")
 
-    # Validate all required env vars
     required = ["IMAP_EMAIL", "IMAP_APP_PASSWORD", "RAHUL_SMTP_EMAIL", "RAHUL_SMTP_APP_PASSWORD"]
     missing = [r for r in required if not os.environ.get(r)]
     if missing:
-        log.error(f"Missing env vars: {', '.join(missing)}")
+        log.error("Missing env vars: %s", ", ".join(missing))
         return
 
     emails, mail, replied_senders, daily_send_count = fetch_matching_emails()
 
-    # Warn if already near the limit before we even start
     remaining = MAX_DAILY_SENDS - daily_send_count
-    log.info(f"Daily send budget: {daily_send_count}/{MAX_DAILY_SENDS} used, {remaining} remaining today")
+    log.info("Daily send budget: %d/%d used, %d remaining today", daily_send_count, MAX_DAILY_SENDS, remaining)
     if remaining <= 0:
-        log.warning(f"Daily send limit already reached ({daily_send_count}/{MAX_DAILY_SENDS}). Stopping.")
-        try: mail.logout()
-        except Exception: pass
+        log.warning("Daily send limit already reached (%d/%d). Stopping.", daily_send_count, MAX_DAILY_SENDS)
+        try:
+            mail.logout()
+        except Exception:
+            pass
         return
 
-    # ── OPEN ONE SMTP CONNECTION FOR ALL EMAILS ──────────────────────────────
     smtp_email = os.environ["RAHUL_SMTP_EMAIL"]
     smtp_server = None
     try:
         smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
         smtp_server.login(smtp_email, os.environ["RAHUL_SMTP_APP_PASSWORD"])
-        log.info(f"✅ SMTP connected: {smtp_email}")
+        log.info("SMTP connected: %s", smtp_email)
     except Exception as e:
-        log.error(f"❌ Could not connect to SMTP: {e}")
-        try: mail.logout()
-        except Exception: pass
+        log.error("Could not connect to SMTP: %s", e)
+        try:
+            mail.logout()
+        except Exception:
+            pass
         return
-    # ─────────────────────────────────────────────────────────────────────────
 
     sent_senders = set()
     matched = 0
 
     for email in emails:
-        log.info(f"\nJOB EMAIL: {email['subject']}")
-        log.info(f"   From: {email['sender']}")
+        log.info("JOB EMAIL: %s", email["subject"])
+        log.info("   From: %s", email["sender"])
 
         try:
             sender_addr = email.get("sender_addr", extract_address(email["reply_to"] or email["sender"]))
 
-            # DEDUP CHECK FIRST — before anything else
             if sender_addr in replied_senders:
-                log.info(f"  SKIPPING — already replied to {sender_addr} today (dedup file)")
+                log.info("SKIPPING - already replied to %s today", sender_addr)
                 continue
 
             if sender_addr in sent_senders:
-                log.info(f"  SKIPPING — already replied to {sender_addr} in this run")
+                log.info("SKIPPING - already replied to %s in this run", sender_addr)
                 continue
 
-            # Only now check the role
             role = detect_role(email)
             if role is None:
-                log.info("  No matching role — skipping")
+                log.info("No matching role - skipping")
                 continue
 
-            # ── DAILY SEND CAP CHECK ──────────────────────────────────────────
             if daily_send_count >= MAX_DAILY_SENDS:
-                log.warning(f"  ⛔ DAILY LIMIT REACHED ({daily_send_count}/{MAX_DAILY_SENDS}) — stopping for today.")
+                log.warning("DAILY LIMIT REACHED (%d/%d) - stopping for today.", daily_send_count, MAX_DAILY_SENDS)
                 break
-            # ─────────────────────────────────────────────────────────────────
 
             matched += 1
-            log.info(f"  SENDING REPLY... ({daily_send_count + 1}/{MAX_DAILY_SENDS})")
-            send_reply(email, role, smtp_server)  # ← reuse single connection
+            log.info("SENDING REPLY... (%d/%d)", daily_send_count + 1, MAX_DAILY_SENDS)
+            send_reply(email, role, smtp_server)
             log_sent(email, role)
             mail = mark_as_replied(mail, email["uid"])
 
@@ -460,38 +468,36 @@ def main():
             sent_senders.add(sender_addr)
             daily_send_count += 1
 
-            # Save dedup immediately after each successful send
             save_daily_dedup(replied_senders, daily_send_count)
 
         except Exception as e:
-            log.error(f"Error processing email: {e}", exc_info=True)
-            # Reconnect SMTP if connection was dropped
+            log.error("Error processing email: %s", e, exc_info=True)
             try:
-                log.info("  ↩️ Reconnecting SMTP...")
+                log.info("Reconnecting SMTP...")
                 smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
                 smtp_server.login(smtp_email, os.environ["RAHUL_SMTP_APP_PASSWORD"])
-                log.info("  ✅ SMTP reconnected successfully")
+                log.info("SMTP reconnected successfully")
             except Exception as se:
-                log.error(f"  ❌ SMTP reconnect failed: {se}")
+                log.error("SMTP reconnect failed: %s", se)
                 break
 
-    # ── CLOSE SMTP CONNECTION ─────────────────────────────────────────────────
     try:
         smtp_server.quit()
-        log.info("✅ SMTP connection closed")
+        log.info("SMTP connection closed")
     except Exception:
         pass
-    # ─────────────────────────────────────────────────────────────────────────
 
-    try: mail.logout()
-    except Exception: pass
+    try:
+        mail.logout()
+    except Exception:
+        pass
 
-    log.info("\n" + "=" * 70)
-    log.info(f"Done — Replied to {matched} job emails")
-    log.info(f"SCAN account : {os.environ.get('IMAP_EMAIL')}")
-log.info(f"SEND account : {os.environ.get('RAHUL_SMTP_EMAIL')}")
-    log.info(f"Daily sends  : {daily_send_count}/{MAX_DAILY_SENDS}")
-    log.info(f"Daily dedup  : {DEDUP_FILE} (resets at midnight)")
+    log.info("=" * 70)
+    log.info("Done - Replied to %d job emails", matched)
+    log.info("SCAN account : %s", os.environ.get("IMAP_EMAIL"))
+    log.info("SEND account : %s", os.environ.get("RAHUL_SMTP_EMAIL"))
+    log.info("Daily sends  : %d/%d", daily_send_count, MAX_DAILY_SENDS)
+    log.info("Daily dedup  : %s (resets at midnight)", str(DEDUP_FILE))
     log.info("Cost: 0.00")
     log.info("=" * 70)
 
