@@ -11,6 +11,8 @@ FIXES:
 6. SCAN from sudheeritservices1@gmail.com
 7. SEND from rajumodhala777@gmail.com
 8. Daily send cap (450) to avoid Gmail 550 limit errors
+9. SINGLE SMTP connection reused for all emails (avoids Google block)
+10. 5 second delay between sends (avoids spam detection)
 """
 
 import os, base64, logging, re, smtplib, time, json
@@ -308,10 +310,11 @@ def get_resume(role):
         b64 = re.sub(r'\s+', '', raw.decode('latin-1').strip())
     return base64.b64decode(b64)
 
-def send_reply(email, role):
+def send_reply(email, role, server):
+    """Send reply using an already-connected SMTP server (no new login)."""
+    smtp_email = os.environ["SMTP_EMAIL"]  # rajumodhala777@gmail.com
     to_email = extract_address(email["reply_to"] or email["sender"])
     cc_email = os.environ.get(role["cc_secret"], "")
-    smtp_email = os.environ["SMTP_EMAIL"]  # rajumodhala777@gmail.com
 
     subject = f"Re: {email['subject']}" if not email["subject"].lower().startswith("re:") else email["subject"]
 
@@ -333,14 +336,15 @@ def send_reply(email, role):
     recipients = [to_email]
     if cc_email: recipients.append(cc_email)
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
-        server.sendmail(smtp_email, recipients, msg.as_string())
+    # Use existing SMTP connection — no new login
+    server.sendmail(smtp_email, recipients, msg.as_string())
 
     log.info(f"  Sent from : {smtp_email}")
     log.info(f"  Sent to   : {to_email}")
     if cc_email: log.info(f"  CC'd      : {cc_email}")
-    time.sleep(3)
+
+    # 5 second delay between sends to avoid Google spam detection
+    time.sleep(5)
 
 def log_sent(email, role):
     csv_path = "logs/sent_log.csv"
@@ -381,6 +385,20 @@ def main():
         except Exception: pass
         return
 
+    # ── OPEN ONE SMTP CONNECTION FOR ALL EMAILS ──────────────────────────────
+    smtp_email = os.environ["SMTP_EMAIL"]
+    smtp_server = None
+    try:
+        smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
+        log.info(f"✅ SMTP connected: {smtp_email}")
+    except Exception as e:
+        log.error(f"❌ Could not connect to SMTP: {e}")
+        try: mail.logout()
+        except Exception: pass
+        return
+    # ─────────────────────────────────────────────────────────────────────────
+
     sent_senders = set()
     matched = 0
 
@@ -408,13 +426,13 @@ def main():
 
             # ── DAILY SEND CAP CHECK ──────────────────────────────────────────
             if daily_send_count >= MAX_DAILY_SENDS:
-                log.warning(f"  ⛔ DAILY LIMIT REACHED ({daily_send_count}/{MAX_DAILY_SENDS}) — stopping for today. Remaining emails will be picked up tomorrow.")
+                log.warning(f"  ⛔ DAILY LIMIT REACHED ({daily_send_count}/{MAX_DAILY_SENDS}) — stopping for today.")
                 break
             # ─────────────────────────────────────────────────────────────────
 
             matched += 1
             log.info(f"  SENDING REPLY... ({daily_send_count + 1}/{MAX_DAILY_SENDS})")
-            send_reply(email, role)
+            send_reply(email, role, smtp_server)  # ← reuse single connection
             log_sent(email, role)
             mail = mark_as_replied(mail, email["uid"])
 
@@ -427,6 +445,23 @@ def main():
 
         except Exception as e:
             log.error(f"Error processing email: {e}", exc_info=True)
+            # Reconnect SMTP if connection was dropped
+            try:
+                log.info("  ↩️ Reconnecting SMTP...")
+                smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+                smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
+                log.info("  ✅ SMTP reconnected successfully")
+            except Exception as se:
+                log.error(f"  ❌ SMTP reconnect failed: {se}")
+                break
+
+    # ── CLOSE SMTP CONNECTION ─────────────────────────────────────────────────
+    try:
+        smtp_server.quit()
+        log.info("✅ SMTP connection closed")
+    except Exception:
+        pass
+    # ─────────────────────────────────────────────────────────────────────────
 
     try: mail.logout()
     except Exception: pass
