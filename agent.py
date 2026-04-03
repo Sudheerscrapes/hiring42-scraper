@@ -1,7 +1,8 @@
 """
 AI Email Agent - Lingaraju Modhala - DAILY RESET VERSION
 Only replies to: DevOps, Cloud Engineer, SRE
-FIX: Daily dedup — one email per sender per day, resets at midnight
+FIX 1: Dedup checked FIRST before anything else
+FIX 2: Dedup saved IMMEDIATELY after each send (not at the end)
 """
 
 import os, base64, logging, re, smtplib, time, json
@@ -37,7 +38,7 @@ def load_daily_dedup():
                 data = json.load(f)
                 file_date = data.get("date", "")
                 today = get_today_date()
-                
+
                 if file_date == today:
                     senders = set(data.get("senders", []))
                     log.info(f"📅 TODAY ({today}): Loaded {len(senders)} senders from dedup file")
@@ -47,7 +48,7 @@ def load_daily_dedup():
                     return set()
         except Exception as e:
             log.warning(f"⚠️ Could not load dedup file: {e}")
-    
+
     log.info(f"📅 TODAY ({get_today_date()}): No dedup file yet - starting fresh")
     return set()
 
@@ -244,30 +245,14 @@ def fetch_matching_emails(your_email, app_password):
             if not sender_addr:
                 log.warning(f"  Could not extract sender email from: {sender}")
                 continue
-                
-            if sender_addr in replied_senders:
-                log.info(f"  TODAY ({get_today_date()}): Already replied to {sender_addr} - {subject[:50]}")
-                continue
-
-            _, msg_data = mail.fetch(uid, "(BODY.PEEK[])")
-            if not msg_data or msg_data[0] is None: continue
-            msg = emaillib.message_from_bytes(msg_data[0][1])
-            body = ""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                        break
-            else:
-                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
 
             emails.append({
-                "uid": uid_str, 
+                "uid": uid_str,
                 "message_id": message_id,
-                "subject": subject, 
+                "subject": subject,
                 "sender": sender,
-                "reply_to": reply_to, 
-                "body": body[:4000],
+                "reply_to": reply_to,
+                "body": "",
                 "sender_addr": sender_addr
             })
             log.info(f"  Queued: {subject[:50]} from {sender_addr}")
@@ -277,7 +262,7 @@ def fetch_matching_emails(your_email, app_password):
             log.error(f"Error reading email {uid_str}: {e}")
             time.sleep(1)
 
-    log.info(f"Ready to reply to {len(emails)} emails")
+    log.info(f"Ready to process {len(emails)} emails")
     return emails, mail, replied_senders
 
 def detect_role(email):
@@ -303,29 +288,29 @@ def send_reply(email, role, your_email, app_password):
     to_email = extract_address(email["reply_to"] or email["sender"])
     cc_email = os.environ.get(role["cc_secret"], "")
     subject = f"Re: {email['subject']}" if not email["subject"].lower().startswith("re:") else email["subject"]
-    
+
     msg = MIMEMultipart()
     msg["From"] = your_email
     msg["To"] = to_email
     msg["Subject"] = subject
     if cc_email: msg["Cc"] = cc_email
-    
+
     msg.attach(MIMEText(role["reply"], "plain"))
-    
+
     resume_bytes = get_resume(role)
     part = MIMEBase("application", "vnd.openxmlformats-officedocument.wordprocessingml.document")
     part.set_payload(resume_bytes)
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", 'attachment; filename="Resume_Lingaraju_Modhala.docx"')
     msg.attach(part)
-    
+
     recipients = [to_email]
     if cc_email: recipients.append(cc_email)
-    
+
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(your_email, app_password)
         server.sendmail(your_email, recipients, msg.as_string())
-    
+
     log.info(f"  Sent to: {to_email}")
     if cc_email: log.info(f"  CC'd: {cc_email}")
     time.sleep(3)
@@ -341,7 +326,8 @@ def log_sent(email, role):
 def main():
     log.info("=" * 70)
     log.info("AI Email Agent - Lingaraju Modhala (DAILY RESET VERSION)")
-    log.info("DAILY DEDUP: One email per sender per day - resets at midnight")
+    log.info("FIX 1: Dedup checked FIRST before anything else")
+    log.info("FIX 2: Dedup saved IMMEDIATELY after each send")
     log.info(f"Time: {datetime.now().isoformat()}")
     log.info("=" * 70)
 
@@ -361,23 +347,30 @@ def main():
 
     emails, mail, replied_senders = fetch_matching_emails(your_email, app_password)
 
+    # Track senders replied in this run (in-memory, in case dedup file fails)
     sent_senders = set()
 
     matched = 0
     for email in emails:
         log.info(f"\nJOB EMAIL: {email['subject']}")
         log.info(f"   From: {email['sender']}")
-        
+
         try:
             sender_addr = email.get("sender_addr", extract_address(email["reply_to"] or email["sender"]))
-            
-            if sender_addr in sent_senders:
-                log.info(f"  Already replied to {sender_addr} in THIS RUN")
+
+            # ✅ FIX 1: DEDUP CHECK FIRST — before role detection or anything else
+            if sender_addr in replied_senders:
+                log.info(f"  SKIPPING — already replied to {sender_addr} today (dedup file)")
                 continue
 
+            if sender_addr in sent_senders:
+                log.info(f"  SKIPPING — already replied to {sender_addr} in this run")
+                continue
+
+            # Only now check the role
             role = detect_role(email)
             if role is None:
-                log.info("  No matching role")
+                log.info("  No matching role — skipping")
                 continue
 
             matched += 1
@@ -386,20 +379,21 @@ def main():
             log_sent(email, role)
             mail = mark_as_replied(mail, email["uid"], your_email, app_password)
 
+            # Update both trackers
             replied_senders.add(sender_addr)
-            
             sent_senders.add(sender_addr)
 
-        except Exception as e:
-            log.error(f"Error: {e}", exc_info=True)
+            # ✅ FIX 2: SAVE DEDUP IMMEDIATELY — not at the end
+            save_daily_dedup(replied_senders)
 
-    save_daily_dedup(replied_senders)
+        except Exception as e:
+            log.error(f"Error processing email: {e}", exc_info=True)
 
     try: mail.logout()
     except Exception: pass
-    
+
     log.info("\n" + "=" * 70)
-    log.info(f"Done - Replied to {matched} job emails")
+    log.info(f"Done — Replied to {matched} job emails")
     log.info(f"Daily dedup file: {DEDUP_FILE} (resets at midnight)")
     log.info("Cost: 0.00")
     log.info("=" * 70)
