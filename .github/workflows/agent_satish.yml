@@ -1,0 +1,32 @@
+﻿name: AI Email Agent - Satish .NET
+
+on:
+  schedule:
+    - cron: '*/15 13-23 * * *'
+    - cron: '*/15 0-23 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pytz
+
+      - name: Run Satish Email Agent
+        env:
+          IMAP_EMAIL: ${{ secrets.IMAP_EMAIL }}
+          IMAP_APP_PASSWORD: ${{ secrets.IMAP_APP_PASSWORD }}
+          SATISH_SMTP_EMAIL: ${{ secrets.SATISH_SMTP_EMAIL }}
+          SATISH_SMTP_APP_PASSWORD: ${{ secrets.SATISH_SMTP_APP_PASSWORD }}
+          CC_SATISH: ${{ secrets.CC_SATISH }}
+        run: python agent_satish.py
