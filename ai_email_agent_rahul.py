@@ -90,13 +90,13 @@ def is_within_run_window():
 
 SHARED_REPLY = """Hi,
 
-I hope you're doing well. I'm reaching out to express my interest in opportunities that align with my background and experience.
 
-I'm a Data Engineer with 5+ years of experience building scalable cloud-based data architectures and real-time analytics solutions. My core expertise includes Azure (ADF, Synapse Analytics, Databricks, ADLS, Event Hubs), Snowflake, Apache Spark (PySpark), Kafka, and dbt. I have hands-on experience designing ETL/ELT pipelines, Lakehouse architectures, data warehouses, and CI/CD workflows using Azure DevOps and Terraform. I've delivered solutions across healthcare, finance, insurance, and telecom domains with HIPAA and GDPR compliance.
 
-I've attached my resume for your review. I'd love the opportunity to connect and discuss how my skills could be a great fit for your team.
 
-Thank you for your time and consideration.
+In response to your job posting.
+Here I am attaching my consultant's updated resume. 
+Please review the resume and let me know if it matches your position.
+Looking forward to working with you.
 
 Best regards,
 Rahul Kumar Gunti
