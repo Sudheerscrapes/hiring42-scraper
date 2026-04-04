@@ -99,10 +99,21 @@ Here I am attaching my consultant's updated resume.
 Please review the resume and let me know if it matches your position.
 Looking forward to working with you.
 
-Best regards,
-Satish
-Phone: +1-945-230-8941
-Email: usathish2025@gmail.com"""
+Thanks & Regards,
+
+Sudheer Kumar, Mandava
+
+Mail: sudheer@adeptscripts.com
+
+Mobile: +1 8374225556
+
+8501 WADE BOULEVARD SUITE 870
+FRISCO TX 7503
+Recruitment Manager
+
+www.adeptscripts.com
+
+"""
 
 ROLES = [
     {
