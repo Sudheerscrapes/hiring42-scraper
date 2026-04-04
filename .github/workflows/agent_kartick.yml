@@ -1,0 +1,32 @@
+﻿name: AI Email Agent - Kartick MuleSoft
+
+on:
+  schedule:
+    - cron: '*/15 13-23 * * *'
+    - cron: '*/15 0-23 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pytz
+
+      - name: Run Kartick Email Agent
+        env:
+          IMAP_EMAIL: ${{ secrets.IMAP_EMAIL }}
+          IMAP_APP_PASSWORD: ${{ secrets.IMAP_APP_PASSWORD }}
+          KARTICK_SMTP_EMAIL: ${{ secrets.KARTICK_SMTP_EMAIL }}
+          KARTICK_SMTP_APP_PASSWORD: ${{ secrets.KARTICK_SMTP_APP_PASSWORD }}
+          CC_KARTICK: ${{ secrets.CC_KARTICK }}
+        run: python agent_kartick.py
