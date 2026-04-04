@@ -1,5 +1,5 @@
 
-# 📧 AI Email Agent - Recruitment Auto Responder
+# 📧 AI Email Agent - Recruitment Auto sender according to matched resumes 
 
 An automated email agent that replies to job recruitment emails with a resume attachment.
 Runs every 15 minutes via GitHub Actions — completely free.
