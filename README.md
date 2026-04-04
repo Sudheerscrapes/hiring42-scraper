@@ -10,7 +10,7 @@ Runs every 15 minutes via GitHub Actions — completely free.
 
 1. Connects to Gmail via IMAP
 2. Searches today's unread emails by job-related keywords in the subject line
-3. Matches emails to a role (DevOps, .NET, MuleSoft,sap SD etc.)
+3. Matches emails to a role (DevOps, .NET, MuleSoft,sap SD,Data engineer etc.)
 4. Sends a reply with the consultant's resume attached
 5. Marks the email as replied to avoid duplicates
 6. Resets daily at midnight (max 450 emails/day per agent)
