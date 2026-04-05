@@ -12,28 +12,191 @@ from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlencode
 
 Path("logs").mkdir(exist_ok=True)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("logs/agent_hiring42.log"), logging.StreamHandler()])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("logs/agent_hiring42.log"),
+        logging.StreamHandler()
+    ]
+)
 log = logging.getLogger(__name__)
 
-DEDUP_FILE = Path("logs") / "daily_replied_senders_hiring42.json"
+DEDUP_FILE      = Path("logs") / "daily_replied_senders_hiring42.json"
 MAX_DAILY_SENDS = 450
-JOBS_BASE_URL = "https://www.hiring42.com/all_jobs"
+JOBS_BASE_URL   = "https://www.hiring42.com/all_jobs"
 
-# ── Keywords that must appear in the job title ──────────────────────────────
-RELEVANT_KEYWORDS = [
-    "devops", "dev ops", "cloud", "sre", "site reliability",
-    "kubernetes", "k8s", "terraform", "aws", "azure", "gcp",
-    "platform engineer", "infrastructure", "docker", "jenkins",
-    "ansible", "openshift", "devsecops", "architect", "ci/cd",
-    "cicd", "helm", "argocd", "gitlab", "pipeline"
+# =============================================================================
+#  EMAIL BODY
+# =============================================================================
+SHARED_REPLY = """Hi,
+
+In response to your job posting.
+Here I am attaching my consultant's resume.
+Please review the resume and let me know if it matches your position.
+Looking forward to working with you.
+
+Best regards,
+Lingaraju Modhala
+Phone: +1 940 281 5324
+Email: rajumodhala777@gmail.com"""
+
+# =============================================================================
+#  JOB PROFILES
+#  keywords     = title must contain at least one (sends email)
+#  search_terms = what to search on hiring42.com
+# =============================================================================
+PROFILES = [
+    {
+        "name": "DevOps Engineer",
+        "keywords": [
+            "devops engineer",
+            "sr. devops",
+            "sr devops",
+            "senior devops",
+            "lead devops",
+            "devops lead",
+            "devsecops",
+            "dev ops",
+            "ci/cd engineer",
+            "build and release",
+            "release engineer",
+            "pipeline engineer",
+            "devops",
+        ],
+        "search_terms": [
+            "devops",
+            "devsecops",
+            "ci/cd engineer",
+            "build and release",
+            "pipeline engineer",
+        ],
+        "resume_file": "resume_lingaraju_b64.txt",
+        "cc_secret":   "CC_DEVOPS",
+    },
+    {
+        "name": "Cloud Engineer",
+        "keywords": [
+            "cloud engineer",
+            "cloud architect",
+            "cloud infrastructure",
+            "aws cloud engineer",
+            "aws engineer",
+            "aws architect",
+            "aws devops",
+            "azure cloud engineer",
+            "azure engineer",
+            "azure architect",
+            "azure devops engineer",
+            "gcp engineer",
+            "gcp architect",
+            "platform engineer",
+            "infrastructure engineer",
+        ],
+        "search_terms": [
+            "cloud engineer",
+            "aws engineer",
+            "azure engineer",
+            "gcp engineer",
+            "platform engineer",
+            "infrastructure engineer",
+            "cloud architect",
+        ],
+        "resume_file": "resume_lingaraju_b64.txt",
+        "cc_secret":   "CC_CLOUD",
+    },
+    {
+        "name": "Site Reliability Engineer",
+        "keywords": [
+            "site reliability engineer",
+            "site reliability",
+            "sre engineer",
+            "sr. sre",
+            "senior sre",
+            "lead sre",
+            "sre lead",
+            "reliability engineer",
+            "sre",
+        ],
+        "search_terms": [
+            "sre",
+            "site reliability",
+        ],
+        "resume_file": "resume_lingaraju_b64.txt",
+        "cc_secret":   "CC_SRE",
+    },
+    {
+        "name": "Kubernetes / Container Engineer",
+        "keywords": [
+            "kubernetes engineer",
+            "kubernetes developer",
+            "k8s engineer",
+            "docker engineer",
+            "openshift engineer",
+            "container engineer",
+            "helm engineer",
+            "kubernetes",
+            "docker",
+            "openshift",
+        ],
+        "search_terms": [
+            "kubernetes",
+            "docker",
+            "openshift",
+        ],
+        "resume_file": "resume_lingaraju_b64.txt",
+        "cc_secret":   "CC_DEVOPS",
+    },
+    {
+        "name": "Terraform / Automation Engineer",
+        "keywords": [
+            "terraform engineer",
+            "terraform developer",
+            "infrastructure automation",
+            "ansible engineer",
+            "gitops engineer",
+            "terraform",
+            "ansible",
+            "argocd",
+            "helm",
+            "gitlab",
+            "jenkins",
+        ],
+        "search_terms": [
+            "terraform",
+            "ansible",
+            "jenkins",
+        ],
+        "resume_file": "resume_lingaraju_b64.txt",
+        "cc_secret":   "CC_DEVOPS",
+    },
 ]
 
-def is_relevant_title(title):
+def get_profile_for_title(title):
+    """Return best matching profile for a job title, or None."""
     t = title.lower()
-    return any(kw in t for kw in RELEVANT_KEYWORDS)
+    for profile in PROFILES:
+        if any(kw in t for kw in profile["keywords"]):
+            return profile
+    return None
 
-# ── Date helpers ─────────────────────────────────────────────────────────────
+def is_relevant_title(title):
+    return get_profile_for_title(title) is not None
+
+def build_search_list():
+    """Flat deduplicated list of {search, profile} from all profiles."""
+    seen   = set()
+    result = []
+    for profile in PROFILES:
+        for term in profile["search_terms"]:
+            if term not in seen:
+                seen.add(term)
+                result.append({"search": term, "profile": profile})
+    return result
+
+# =============================================================================
+#  DATE HELPERS
+# =============================================================================
 def get_today_date():
     return str(date.today())
 
@@ -51,14 +214,16 @@ def get_valid_posted_strings():
 def is_posted_recently(text):
     return any(d in text for d in get_valid_posted_strings())
 
-# ── Dedup helpers ────────────────────────────────────────────────────────────
+# =============================================================================
+#  DEDUP HELPERS
+# =============================================================================
 def load_daily_dedup():
     if DEDUP_FILE.exists():
         try:
             with open(DEDUP_FILE, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
                 if data.get("date") == get_today_date():
-                    senders = set(data.get("senders", []))
+                    senders    = set(data.get("senders", []))
                     send_count = data.get("send_count", 0)
                     log.info("TODAY (%s): %d senders, %d/%d sent",
                              get_today_date(), len(senders), send_count, MAX_DAILY_SENDS)
@@ -71,46 +236,18 @@ def load_daily_dedup():
     return set(), 0
 
 def save_daily_dedup(senders, send_count=0):
-    data = {"date": get_today_date(), "senders": sorted(list(senders)), "send_count": send_count}
+    data = {
+        "date":       get_today_date(),
+        "senders":    sorted(list(senders)),
+        "send_count": send_count,
+    }
     with open(DEDUP_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     log.info("SAVED: %d senders, %d sent today", len(senders), send_count)
 
-# ── Email body ───────────────────────────────────────────────────────────────
-SHARED_REPLY = """Hi,
-
-In response to your job posting.
-Here I am attaching my consultant's resume.
-Please review the resume and let me know if it matches your position.
-Looking forward to working with you.
-
-Best regards,
-Lingaraju Modhala
-Phone: +1 940 281 5324
-Email: rajumodhala777@gmail.com"""
-
-# ── Search keywords ──────────────────────────────────────────────────────────
-SEARCH_KEYWORDS = [
-    {"search": "devops",                  "cc_secret": "CC_DEVOPS"},
-    {"search": "cloud engineer",          "cc_secret": "CC_CLOUD"},
-    {"search": "sre",                     "cc_secret": "CC_SRE"},
-    {"search": "site reliability",        "cc_secret": "CC_SRE"},
-    {"search": "kubernetes",              "cc_secret": "CC_DEVOPS"},
-    {"search": "terraform",               "cc_secret": "CC_DEVOPS"},
-    {"search": "aws engineer",            "cc_secret": "CC_CLOUD"},
-    {"search": "azure engineer",          "cc_secret": "CC_CLOUD"},
-    {"search": "gcp engineer",            "cc_secret": "CC_CLOUD"},
-    {"search": "platform engineer",       "cc_secret": "CC_DEVOPS"},
-    {"search": "infrastructure engineer", "cc_secret": "CC_DEVOPS"},
-    {"search": "docker",                  "cc_secret": "CC_DEVOPS"},
-    {"search": "jenkins",                 "cc_secret": "CC_DEVOPS"},
-    {"search": "ansible",                 "cc_secret": "CC_DEVOPS"},
-    {"search": "openshift",               "cc_secret": "CC_DEVOPS"},
-    {"search": "devsecops",               "cc_secret": "CC_DEVOPS"},
-    {"search": "cloud architect",         "cc_secret": "CC_CLOUD"},
-]
-
-# ── Skip lists ───────────────────────────────────────────────────────────────
+# =============================================================================
+#  SKIP / NOISE LISTS
+# =============================================================================
 SKIP_EMAILS = [
     "rajumodhala777@gmail.com",
     "sudheeritservices1@gmail.com",
@@ -128,42 +265,38 @@ SKIP_LINES = {
     "experience (years)", "apply filters", "active",
     "search results", "jobs tailored to your search",
     "use quick actions to keep submissions high-quality and status up to date.",
-    "search",   # ← FIX: skip bare "Search" UI button
+    "search",
 }
 
-# Promo/UI text that should never be treated as a job title
 SKIP_TITLE_PHRASES = [
-    "explore verified roles",
-    "explore roles",
-    "verified roles",
-    "across the network",
-    "submit your",
-    "find similar",
-    "post a job",
-    "quick actions",
-    "login",
-    "sign up",
-    "how to",
+    "explore verified roles", "explore roles", "verified roles",
+    "across the network", "submit your", "find similar",
+    "post a job", "quick actions", "login", "sign up", "how to",
 ]
+
+INLINE_NOISE = re.compile(
+    r'^(C2C|W2|1099|ALL|REMOTE|ONSITE|HYBRID|REMOTE\/ONSITE HYBRID'
+    r'|EXP N\/A|\d+[\-\s]?\d*\s*YRS?|US CITI\w*|H1B|GREEN CARD'
+    r'|OPT|CPT|GC|USC|ACTIVE|SCORE.*|Score.*)$',
+    re.IGNORECASE
+)
 
 def is_bad_title(title):
     t = title.lower()
-    # UI/promo phrases
     for phrase in SKIP_TITLE_PHRASES:
         if phrase in t:
             return True
-    # Starts with "Posted:" — timestamp leaked into title
     if title.startswith("Posted:"):
         return True
-    # Looks like a plain date/time stamp
     if re.match(r'^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d', title):
         return True
-    # Too long = probably UI text
     if len(title) > 80:
         return True
     return False
 
-# ── Selenium helpers ─────────────────────────────────────────────────────────
+# =============================================================================
+#  SELENIUM / BROWSER HELPERS
+# =============================================================================
 def get_chrome_driver():
     options = Options()
     options.add_argument("--headless=new")
@@ -186,16 +319,14 @@ def get_chrome_driver():
     return driver
 
 def wait_for_react(driver, timeout=60):
-    """Wait for React root to render with multiple fallback checks."""
+    """Wait for React root with content-based fallback."""
     try:
-        # 1. Wait for React root to have children
         WebDriverWait(driver, timeout).until(
             lambda d: d.execute_script(
                 "return document.getElementById('root') && "
                 "document.getElementById('root').children.length > 0"
             )
         )
-        # 2. Also wait for at least one job-like element
         WebDriverWait(driver, 20).until(
             lambda d: "@" in d.find_element(By.TAG_NAME, "body").text
             or "Posted:" in d.find_element(By.TAG_NAME, "body").text
@@ -205,7 +336,6 @@ def wait_for_react(driver, timeout=60):
         log.info("React ready. Height: %d", h)
         return h
     except Exception as e:
-        # Fallback: even if React check failed, check if page has useful content
         try:
             body = driver.find_element(By.TAG_NAME, "body").text
             h    = driver.execute_script("return document.body.scrollHeight")
@@ -218,10 +348,9 @@ def wait_for_react(driver, timeout=60):
         return 0
 
 def load_search_page(driver, search_term, retries=3):
-    """Load search page with retry on failure."""
+    """Load hiring42 search page with up to 3 retries."""
     params = urlencode({"search": search_term})
     url    = f"{JOBS_BASE_URL}?{params}"
-
     for attempt in range(1, retries + 1):
         try:
             log.info("Loading (attempt %d/%d): %s", attempt, retries, url)
@@ -229,84 +358,75 @@ def load_search_page(driver, search_term, retries=3):
             h = wait_for_react(driver)
             if h > 0:
                 return h
-            log.warning("Empty page on attempt %d - waiting 15s before retry", attempt)
+            log.warning("Empty page on attempt %d - waiting 15s", attempt)
             time.sleep(15)
         except Exception as e:
             log.warning("Load error attempt %d: %s", attempt, e)
             time.sleep(15)
-
     log.warning("All %d attempts failed for '%s'", retries, search_term)
     return 0
 
 def scroll_all(driver):
+    """Scroll to bottom to load all lazy-loaded job cards."""
     time.sleep(1)
     last_height = driver.execute_script("return document.body.scrollHeight")
-    no_change = 0
-    attempts = 0
+    no_change   = 0
+    attempts    = 0
     while attempts < 150:
         driver.execute_script("window.scrollBy(0, 800);")
         time.sleep(0.8)
-        attempts += 1
+        attempts  += 1
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
             no_change += 1
             if no_change >= 5:
                 break
         else:
-            no_change = 0
+            no_change   = 0
             last_height = new_height
-    log.info("Scrolled %d times, height: %d", attempts, last_height)
+    log.info("Scrolled %d times, final height: %d", attempts, last_height)
     driver.execute_script("window.scrollTo(0, 0);")
     time.sleep(0.5)
 
-# ── Core parser (with title relevance fix) ───────────────────────────────────
-def parse_jobs_from_page(driver, seen_emails, cc_secret):
-    jobs = []
+# =============================================================================
+#  PAGE PARSER
+# =============================================================================
+def parse_jobs_from_page(driver, seen_emails, profile):
+    """
+    Parse job cards from hiring42 page body text.
+    Card layout:
+        <Job Title>
+        <C2C> <W2> <ONSITE> <ALL> <N YRS>   (badge tokens)
+        <City, ST>
+        <email@domain.com>
+        Posted: Mmm DD, YY, HH:MM am/pm      <- block boundary
+        Score: X.XX
+        ACTIVE
+    """
+    jobs          = []
     email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
-    body_text = driver.find_element(By.TAG_NAME, "body").text
-    log.info("Emails on page: %d", body_text.count("@"))
+    body_text     = driver.find_element(By.TAG_NAME, "body").text
+    log.info("@ symbols on page: %d", body_text.count("@"))
 
     lines = [l.strip() for l in body_text.split('\n') if l.strip()]
 
-    # ── Noise tokens that appear inline on hiring42 job cards ───────────────
-    INLINE_NOISE = re.compile(
-        r'^(C2C|W2|1099|ALL|REMOTE|ONSITE|HYBRID|REMOTE\/ONSITE HYBRID'
-        r'|EXP N\/A|\d+[\-\s]?\d*\s*YRS?|US CITI\w*|H1B|GREEN CARD'
-        r'|OPT|CPT|GC|USC|ACTIVE|SCORE.*|Score.*)$',
-        re.IGNORECASE
-    )
-
-    # ── Split page into per-job blocks ───────────────────────────────────────
-    # Each block starts right after a "Posted:" line from the PREVIOUS block,
-    # i.e. collect lines until we hit the NEXT "Posted:" line.
-    # Layout per job card (hiring42):
-    #   <Job Title>
-    #   <tag> <tag> ...   (C2C / W2 / ONSITE / ALL / N YRS)
-    #   <City, ST>
-    #   <email>
-    #   Posted: Mmm DD, YY, HH:MM am/pm    ← block boundary
-    #   Score: X.XX
-    #   ACTIVE
-
+    # Each block ends at the "Posted:" line
     job_blocks = []
-    current = []
+    current    = []
     for line in lines:
         current.append(line)
-        # "Posted:" marks the END of a job card
         if re.match(r'^Posted:', line, re.IGNORECASE):
             job_blocks.append(current[:])
             current = []
 
-    log.info("Job blocks: %d", len(job_blocks))
+    log.info("Job blocks found: %d", len(job_blocks))
 
     for block in job_blocks:
         block_text = '\n'.join(block)
 
-        # Must be posted today or yesterday
         if not is_posted_recently(block_text):
             continue
 
-        # Must have an email
         emails_found = email_pattern.findall(block_text)
         if not emails_found:
             continue
@@ -316,14 +436,7 @@ def parse_jobs_from_page(driver, seen_emails, cc_secret):
         if any(skip in email_addr for skip in SKIP_EMAILS):
             continue
 
-        # ── Title: first meaningful line in the block ────────────────────────
-        # hiring42 layout always puts the job title as the FIRST line of the
-        # card, so we scan from the top and take the first line that:
-        #   - is not a noise token / tag
-        #   - is not a location "City, ST"
-        #   - is not the Posted / Score line
-        #   - is not an email address
-        #   - passes is_relevant_title()
+        # Title = first meaningful line; must match profile keywords
         title = None
         for line in block:
             if not line:
@@ -336,88 +449,106 @@ def parse_jobs_from_page(driver, seen_emails, cc_secret):
                 continue
             if INLINE_NOISE.match(line):
                 continue
-            # "City, ST" pattern
             if re.match(r'^[A-Za-z\s\.\-]+,\s*[A-Z]{2}$', line):
                 continue
             if is_bad_title(line):
                 log.info("  SKIP bad title: %s", line[:60])
                 continue
-            # Accept if relevant keyword present
             if is_relevant_title(line):
                 title = line
                 break
-            # If first non-noise line has NO keyword it's probably an
-            # unrelated role — skip the whole block
             log.info("  SKIP irrelevant title: %s", line[:60])
-            break   # don't keep scanning; move to next block
+            break
 
         if not title:
-            log.info("  NO relevant title found for: %s", email_addr)
-            continue   # skip entirely — don't send with a garbage subject
+            log.info("  NO relevant title for: %s", email_addr)
+            continue
 
         seen_emails.add(email_addr)
-        jobs.append({"title": title, "email": email_addr, "cc_secret": cc_secret})
-        log.info("  MATCH: %s -> %s", title[:55], email_addr)
+        jobs.append({
+            "title":        title,
+            "email":        email_addr,
+            "cc_secret":    profile["cc_secret"],
+            "resume_file":  profile["resume_file"],
+            "profile_name": profile["name"],
+        })
+        log.info("  MATCH [%s]: %s -> %s", profile["name"], title[:50], email_addr)
 
     return jobs
 
-# ── Resume loader ─────────────────────────────────────────────────────────────
-def get_resume():
-    fname = "resume_lingaraju_b64.txt"
+# =============================================================================
+#  RESUME LOADER
+# =============================================================================
+def get_resume(fname="resume_lingaraju_b64.txt"):
     if not Path(fname).exists():
-        raise ValueError("Resume file not found!")
+        raise ValueError(f"Resume file not found: {fname}")
     raw = Path(fname).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         text = raw.decode('utf-16').strip()
     else:
         text = raw.decode('latin-1').strip()
     lines = [l for l in text.splitlines() if not l.startswith("-----")]
-    b64 = re.sub(r'\s+', '', "".join(lines))
+    b64   = re.sub(r'\s+', '', "".join(lines))
     missing = len(b64) % 4
     if missing:
         b64 += "=" * (4 - missing)
     return base64.b64decode(b64)
 
-# ── Email sender ──────────────────────────────────────────────────────────────
+# =============================================================================
+#  EMAIL SENDER
+# =============================================================================
 def send_email(job, smtp_server):
     smtp_email = os.environ["SMTP_EMAIL"]
-    to_email = job["email"]
-    cc_email = os.environ.get(job["cc_secret"], "")
-    subject = "Re: " + job["title"]
+    to_email   = job["email"]
+    cc_email   = os.environ.get(job["cc_secret"], "")
+    subject    = "Re: " + job["title"]
+
     msg = MIMEMultipart()
-    msg["From"] = smtp_email
-    msg["To"] = to_email
+    msg["From"]    = smtp_email
+    msg["To"]      = to_email
     msg["Subject"] = subject
     if cc_email:
         msg["Cc"] = cc_email
+
     msg.attach(MIMEText(SHARED_REPLY, "plain"))
-    resume_bytes = get_resume()
+
+    resume_bytes = get_resume(job.get("resume_file", "resume_lingaraju_b64.txt"))
     part = MIMEBase("application", "vnd.openxmlformats-officedocument.wordprocessingml.document")
     part.set_payload(resume_bytes)
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", 'attachment; filename="Resume_Lingaraju_Modhala.docx"')
     msg.attach(part)
+
     recipients = [to_email]
     if cc_email:
         for cc in cc_email.split(","):
             cc = cc.strip()
             if cc and cc not in recipients:
                 recipients.append(cc)
+
     smtp_server.sendmail(smtp_email, recipients, msg.as_string())
-    log.info(">>> SENT: %s | Subject: %s", to_email, subject)
+    log.info(">>> SENT [%s]: %s | Subject: %s",
+             job.get("profile_name", ""), to_email, subject)
     time.sleep(5)
 
 def log_sent(job):
     csv_path = "logs/sent_log_hiring42.csv"
-    is_new = not os.path.exists(csv_path)
+    is_new   = not os.path.exists(csv_path)
     with open(csv_path, "a", encoding="utf-8") as f:
         if is_new:
-            f.write("timestamp,email,title,cc\n")
+            f.write("timestamp,email,title,profile,cc\n")
         cc = os.environ.get(job["cc_secret"], "none")
-        f.write('{}, "{}","{}","{}"\n'.format(
-            datetime.now().isoformat(), job["email"], job["title"], cc))
+        f.write('{}, "{}","{}","{}","{}"\n'.format(
+            datetime.now().isoformat(),
+            job["email"],
+            job["title"],
+            job.get("profile_name", ""),
+            cc,
+        ))
 
-# ── Send loop ─────────────────────────────────────────────────────────────────
+# =============================================================================
+#  SEND LOOP
+# =============================================================================
 def send_jobs(jobs, replied_senders, daily_send_count, smtp_server, sent):
     smtp_email = os.environ["SMTP_EMAIL"]
     for job in jobs:
@@ -426,7 +557,7 @@ def send_jobs(jobs, replied_senders, daily_send_count, smtp_server, sent):
             break
         email_addr = job["email"]
         if email_addr in replied_senders:
-            log.info("SKIP (already sent): %s", email_addr)
+            log.info("SKIP (already sent today): %s", email_addr)
             continue
         try:
             log.info("SENDING [%d/%d]: %s -> %s",
@@ -436,7 +567,7 @@ def send_jobs(jobs, replied_senders, daily_send_count, smtp_server, sent):
             log_sent(job)
             replied_senders.add(email_addr)
             daily_send_count += 1
-            sent += 1
+            sent             += 1
             save_daily_dedup(replied_senders, daily_send_count)
         except Exception as e:
             log.error("Send error %s: %s", email_addr, e)
@@ -449,7 +580,9 @@ def send_jobs(jobs, replied_senders, daily_send_count, smtp_server, sent):
                 break
     return replied_senders, daily_send_count, sent, smtp_server
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# =============================================================================
+#  MAIN
+# =============================================================================
 def main():
     log.info("=" * 70)
     log.info("AI Email Agent - Lingaraju Modhala (hiring42.com)")
@@ -457,17 +590,17 @@ def main():
     log.info("=" * 70)
 
     required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD"]
-    missing = [r for r in required if not os.environ.get(r)]
+    missing  = [r for r in required if not os.environ.get(r)]
     if missing:
         log.error("Missing env vars: %s", ", ".join(missing))
         return
 
     replied_senders, daily_send_count = load_daily_dedup()
     if MAX_DAILY_SENDS - daily_send_count <= 0:
-        log.warning("Daily limit reached. Stopping.")
+        log.warning("Daily limit already reached. Stopping.")
         return
 
-    smtp_email = os.environ["SMTP_EMAIL"]
+    smtp_email  = os.environ["SMTP_EMAIL"]
     smtp_server = None
     try:
         smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
@@ -477,19 +610,22 @@ def main():
         log.error("SMTP failed: %s", e)
         return
 
-    driver = get_chrome_driver()
+    driver      = get_chrome_driver()
     seen_emails = set(replied_senders)
-    sent = 0
+    sent        = 0
+    search_list = build_search_list()
+
+    log.info("Profiles: %d | Search terms: %d", len(PROFILES), len(search_list))
 
     try:
-        for kw in SEARCH_KEYWORDS:
+        for item in search_list:
             if daily_send_count >= MAX_DAILY_SENDS:
                 break
 
-            search_term = kw["search"]
-            cc_secret   = kw["cc_secret"]
+            search_term = item["search"]
+            profile     = item["profile"]
             log.info("=" * 50)
-            log.info("Searching: '%s'", search_term)
+            log.info("Searching: '%s'  [Profile: %s]", search_term, profile["name"])
 
             height = load_search_page(driver, search_term)
             if height < 1500:
@@ -498,7 +634,7 @@ def main():
 
             scroll_all(driver)
 
-            jobs = parse_jobs_from_page(driver, seen_emails, cc_secret)
+            jobs = parse_jobs_from_page(driver, seen_emails, profile)
             log.info("New jobs for '%s': %d", search_term, len(jobs))
 
             if jobs:
@@ -520,7 +656,7 @@ def main():
         pass
 
     log.info("=" * 70)
-    log.info("Done - Sent: %d | Daily: %d/%d", sent, daily_send_count, MAX_DAILY_SENDS)
+    log.info("Done - Sent: %d | Daily total: %d/%d", sent, daily_send_count, MAX_DAILY_SENDS)
     log.info("=" * 70)
 
 if __name__ == "__main__":
