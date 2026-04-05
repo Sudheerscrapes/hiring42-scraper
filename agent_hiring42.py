@@ -1,16 +1,16 @@
-﻿import os, base64, logging, re, smtplib, time, json
+import os, base64, logging, re, smtplib, time, json
 from pathlib import Path
 from datetime import datetime, date, time as dtime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
 
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
@@ -116,29 +116,103 @@ def get_chrome_driver():
     driver = webdriver.Chrome(options=options)
     return driver
 
+def find_search_box(driver):
+    """Try multiple strategies to find a visible, interactable search input."""
+    selectors = [
+        "input[type='search']",
+        "input[placeholder*='search' i]",
+        "input[placeholder*='Search' i]",
+        "input[name*='search' i]",
+        "input[id*='search' i]",
+        "input[class*='search' i]",
+        "input[type='text']",
+        "input",
+    ]
+    for selector in selectors:
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+            for el in elements:
+                if el.is_displayed() and el.is_enabled():
+                    log.info("Found search box with selector: %s", selector)
+                    return el
+        except Exception:
+            continue
+    return None
+
+def submit_search(driver, search_box, search_term):
+    """Scroll into view, click via JS, type keyword, then submit."""
+    try:
+        driver.execute_script("arguments[0].scrollIntoView(true);", search_box)
+        time.sleep(0.5)
+        driver.execute_script("arguments[0].click();", search_box)
+        time.sleep(0.5)
+        search_box.clear()
+        search_box.send_keys(search_term)
+        time.sleep(1)
+    except Exception as e:
+        log.warning("Could not type into search box: %s", e)
+        return False
+
+    # Try submit button first
+    btn_selectors = [
+        "button[type='submit']",
+        "input[type='submit']",
+        "button[class*='search' i]",
+        "button[aria-label*='search' i]",
+        "button.search-btn",
+        "button",
+    ]
+    for btn_sel in btn_selectors:
+        try:
+            btns = driver.find_elements(By.CSS_SELECTOR, btn_sel)
+            for btn in btns:
+                if btn.is_displayed() and btn.is_enabled():
+                    driver.execute_script("arguments[0].click();", btn)
+                    log.info("Submitted via button: %s", btn_sel)
+                    return True
+        except Exception:
+            continue
+
+    # Fallback: Enter key
+    try:
+        search_box.send_keys(Keys.RETURN)
+        log.info("Submitted via Enter key")
+        return True
+    except Exception as e:
+        log.warning("Enter key submission failed: %s", e)
+        return False
+
 def search_and_scrape(driver, search_term, seen_emails):
     jobs = []
     try:
         log.info("Searching for: %s", search_term)
         driver.get(JOBS_URL)
-        time.sleep(3)
+        time.sleep(4)
 
-        # Find search box and type keyword
+        # Save page source for debugging if needed
         try:
-            search_box = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='text'], input[type='search'], input[placeholder*='search'], input[placeholder*='Search']"))
-            )
-            search_box.clear()
-            search_box.send_keys(search_term)
-            time.sleep(1)
+            with open("logs/page_debug.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+        except Exception:
+            pass
 
-            # Click search button
-            search_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit'], button.search, input[type='submit']")
-            search_btn.click()
+        search_box = find_search_box(driver)
+        if not search_box:
+            log.warning("No interactable search box found for: %s — trying URL param approach", search_term)
+            # Fallback: try appending search as URL query param
+            try:
+                encoded = search_term.replace(" ", "+")
+                driver.get(JOBS_URL + "?search=" + encoded)
+                time.sleep(4)
+            except Exception as e:
+                log.error("URL param fallback also failed: %s", e)
+                return jobs
+        else:
+            success = submit_search(driver, search_box, search_term)
+            if not success:
+                log.warning("Search submission failed for: %s", search_term)
+                return jobs
             time.sleep(4)
-        except Exception as e:
-            log.warning("Search box interaction failed: %s", e)
-            return jobs
 
         # Scroll to load all results
         last_height = driver.execute_script("return document.body.scrollHeight")
