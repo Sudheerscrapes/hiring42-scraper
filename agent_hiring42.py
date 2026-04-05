@@ -195,7 +195,7 @@ def scrape_jobs():
                 text = card.text.strip()
                 if not text or len(text) < 10:
                     continue
-                if not is_posted_recently(text):
+                if False: # Date filter disabled - dedup handles duplicates
                     skipped_old += 1
                     continue
                 emails_found = email_pattern.findall(text)
@@ -367,5 +367,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
