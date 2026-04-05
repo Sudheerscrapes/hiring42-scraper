@@ -1,4 +1,5 @@
-﻿"""
+@"
+"""
 AI Email Agent - Lingaraju Modhala (hiring42.com Scraper)
 Scrapes: https://www.hiring42.com/all_jobs
 Sends: rajumodhala777@gmail.com (Gmail SMTP)
@@ -6,19 +7,19 @@ Replies to: DevOps, Cloud Engineer, SRE, Kubernetes, Terraform roles
 
 FEATURES:
 1. Scrapes hiring42.com using Selenium (headless Chrome)
-2. Dedup checked FIRST before anything else
-3. Dedup saved IMMEDIATELY after each send (not at the end)
-4. UTF-8-sig fix for dedup file (BOM handling)
-5. Skips own sent emails
-6. Daily send cap (450) to avoid Gmail 550 limit errors
-7. SINGLE SMTP connection reused for all emails
-8. 5 second delay between sends (avoids spam detection)
-9. Saves scraped emails to dedup - no duplicate sends ever
+2. TODAY + YESTERDAY filter
+3. Dedup checked FIRST before anything else
+4. Dedup saved IMMEDIATELY after each send
+5. UTF-8-sig fix for dedup file (BOM handling)
+6. Skips own sent emails
+7. Daily send cap (450)
+8. SINGLE SMTP connection reused for all emails
+9. 5 second delay between sends
 """
 
 import os, base64, logging, re, smtplib, time, json
 from pathlib import Path
-from datetime import datetime, date, time as dtime
+from datetime import datetime, date, time as dtime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -28,8 +29,6 @@ import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
@@ -42,6 +41,17 @@ JOBS_URL = "https://www.hiring42.com/all_jobs"
 
 def get_today_date():
     return str(date.today())
+
+def get_valid_posted_strings():
+    today = datetime.now()
+    yesterday = datetime.now() - timedelta(days=1)
+    today_str = "Posted: " + today.strftime("%b %d, %y").replace(" 0", " ")
+    yesterday_str = "Posted: " + yesterday.strftime("%b %d, %y").replace(" 0", " ")
+    return [today_str, yesterday_str]
+
+def is_posted_recently(card_text):
+    valid_dates = get_valid_posted_strings()
+    return any(d in card_text for d in valid_dates)
 
 def load_daily_dedup():
     if DEDUP_FILE.exists():
@@ -77,12 +87,7 @@ def save_daily_dedup(senders, send_count=0):
         log.error("Could not save dedup file: %s", e)
 
 def is_within_run_window():
-    ist = pytz.timezone("Asia/Kolkata")
-    now = datetime.now(ist)
-    current_time = now.time()
-    start = dtime(18, 30)
-    end = dtime(4, 30)
-    return current_time >= start or current_time <= end
+    return True  # TIME CHECK DISABLED FOR TESTING
 
 SHARED_REPLY = """Hi,
 
@@ -111,6 +116,7 @@ ROLES = [
             "build and release",
             "release engineer",
             "pipeline engineer",
+            "devops ai engineer",
         ],
         "resume_file": "resume_lingaraju_b64.txt",
         "cc_secret": "CC_DEVOPS",
@@ -212,7 +218,9 @@ def detect_role(title):
     return None
 
 def scrape_jobs():
+    valid_dates = get_valid_posted_strings()
     log.info("Launching Chrome headless browser...")
+    log.info("Date filter: %s", " OR ".join(valid_dates))
     driver = get_chrome_driver()
     jobs = []
 
@@ -221,7 +229,6 @@ def scrape_jobs():
         log.info("Opened: %s", JOBS_URL)
         time.sleep(5)
 
-        # Scroll to load all jobs
         last_height = driver.execute_script("return document.body.scrollHeight")
         scroll_attempts = 0
         while scroll_attempts < 10:
@@ -232,26 +239,25 @@ def scrape_jobs():
                 break
             last_height = new_height
             scroll_attempts += 1
-        log.info("Page fully scrolled after %d attempts", scroll_attempts)
+        log.info("Page scrolled %d times", scroll_attempts)
 
-        # Extract job title and email from page
-        page_source = driver.page_source
-
-        # Find all email addresses on the page
         email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
-
-        # Try to get job cards
         job_cards = driver.find_elements(By.CSS_SELECTOR, "div, li, article, tr")
         log.info("Found %d potential job elements", len(job_cards))
 
         seen_emails = set()
+        skipped_old = 0
         for card in job_cards:
             try:
                 text = card.text.strip()
                 if not text or len(text) < 10:
                     continue
 
-                # Find email in card
+                # TODAY + YESTERDAY ONLY CHECK
+                if not is_posted_recently(text):
+                    skipped_old += 1
+                    continue
+
                 emails_found = email_pattern.findall(text)
                 if not emails_found:
                     continue
@@ -262,15 +268,14 @@ def scrape_jobs():
                 if any(skip in email_addr for skip in SKIP_EMAILS):
                     continue
 
-                # Get job title - first line of card text
                 lines = [l.strip() for l in text.split('\n') if l.strip()]
                 if not lines:
                     continue
                 title = lines[0]
 
-                # Must match a role
                 role = detect_role(title)
                 if role is None:
+                    log.info("No role match for: %s", title[:50])
                     continue
 
                 seen_emails.add(email_addr)
@@ -278,14 +283,14 @@ def scrape_jobs():
                     "title": title,
                     "email": email_addr,
                     "role": role,
-                    "text": text[:200]
                 })
                 log.info("Job found: %s -> %s", title[:50], email_addr)
 
-            except Exception as e:
+            except Exception:
                 continue
 
-        log.info("Total matching jobs scraped: %d", len(jobs))
+        log.info("Skipped %d old job listings", skipped_old)
+        log.info("Total matching jobs today+yesterday: %d", len(jobs))
 
     except Exception as e:
         log.error("Scraping error: %s", e)
@@ -299,7 +304,6 @@ def get_resume(role):
     fname = role["resume_file"]
     if not Path(fname).exists():
         raise ValueError("Resume file '{}' not found!".format(fname))
-    log.info("Resume: %s", fname)
     raw = Path(fname).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         text = raw.decode('utf-16').strip()
@@ -373,13 +377,14 @@ def main():
     log.info("AI Email Agent - Lingaraju Modhala (hiring42.com)")
     log.info("SCRAPE : https://www.hiring42.com/all_jobs")
     log.info("SEND from : rajumodhala777@gmail.com")
+    log.info("Date filter : %s", " OR ".join(get_valid_posted_strings()))
     log.info("Time      : %s", datetime.now().isoformat())
     log.info("=" * 70)
 
     if not is_within_run_window():
-        log.info("Outside run window (6:30 PM - 4:30 AM IST). Skipping.")
+        log.info("Outside run window. Skipping.")
         return
-    log.info("Within run window. Proceeding...")
+    log.info("Proceeding...")
 
     required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD"]
     missing = [r for r in required if not os.environ.get(r)]
@@ -390,14 +395,14 @@ def main():
     replied_senders, daily_send_count = load_daily_dedup()
 
     remaining = MAX_DAILY_SENDS - daily_send_count
-    log.info("Daily send budget: %d/%d used, %d remaining", daily_send_count, MAX_DAILY_SENDS, remaining)
+    log.info("Daily budget: %d/%d used, %d remaining", daily_send_count, MAX_DAILY_SENDS, remaining)
     if remaining <= 0:
-        log.warning("Daily send limit reached. Stopping.")
+        log.warning("Daily limit reached. Stopping.")
         return
 
     jobs = scrape_jobs()
     if not jobs:
-        log.info("No matching jobs found today.")
+        log.info("No matching jobs found.")
         return
 
     smtp_email = os.environ["SMTP_EMAIL"]
@@ -420,7 +425,7 @@ def main():
                 continue
 
             if daily_send_count >= MAX_DAILY_SENDS:
-                log.warning("DAILY LIMIT REACHED (%d/%d). Stopping.", daily_send_count, MAX_DAILY_SENDS)
+                log.warning("DAILY LIMIT REACHED. Stopping.")
                 break
 
             log.info("SENDING to %s for: %s", email_addr, job["title"][:50])
@@ -436,7 +441,6 @@ def main():
         except Exception as e:
             log.error("Error sending to %s: %s", job.get("email"), e, exc_info=True)
             try:
-                log.info("Reconnecting SMTP...")
                 smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
                 smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
                 log.info("SMTP reconnected")
@@ -458,3 +462,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+"@ | Out-File -FilePath "agent_hiring42.py" -Encoding utf8
