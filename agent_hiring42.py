@@ -43,26 +43,18 @@ Email: rajumodhala777@gmail.com"""
 
 # =============================================================================
 #  JOB PROFILES
-#  keywords     = title must contain at least one (sends email)
-#  search_terms = what to search on hiring42.com
 # =============================================================================
 PROFILES = [
     {
         "name": "DevOps Engineer",
         "keywords": [
-            "devops engineer",
-            "sr. devops",
-            "sr devops",
-            "senior devops",
-            "lead devops",
-            "devops lead",
+            "devops",          # catches DevOps AI Engineer, DevOps Engineer (AWS), Sr. DevOps Lead, etc.
             "devsecops",
             "dev ops",
-            "ci/cd engineer",
+            "ci/cd",
             "build and release",
             "release engineer",
             "pipeline engineer",
-            "devops",
         ],
         "search_terms": [
             "devops",
@@ -80,16 +72,9 @@ PROFILES = [
             "cloud engineer",
             "cloud architect",
             "cloud infrastructure",
-            "aws cloud engineer",
-            "aws engineer",
-            "aws architect",
-            "aws devops",
-            "azure cloud engineer",
-            "azure engineer",
-            "azure architect",
-            "azure devops engineer",
-            "gcp engineer",
-            "gcp architect",
+            "aws",
+            "azure",
+            "gcp",
             "platform engineer",
             "infrastructure engineer",
         ],
@@ -108,15 +93,9 @@ PROFILES = [
     {
         "name": "Site Reliability Engineer",
         "keywords": [
-            "site reliability engineer",
             "site reliability",
-            "sre engineer",
-            "sr. sre",
-            "senior sre",
-            "lead sre",
-            "sre lead",
-            "reliability engineer",
             "sre",
+            "reliability engineer",
         ],
         "search_terms": [
             "sre",
@@ -128,16 +107,12 @@ PROFILES = [
     {
         "name": "Kubernetes / Container Engineer",
         "keywords": [
-            "kubernetes engineer",
-            "kubernetes developer",
-            "k8s engineer",
-            "docker engineer",
-            "openshift engineer",
-            "container engineer",
-            "helm engineer",
             "kubernetes",
+            "k8s",
             "docker",
             "openshift",
+            "container engineer",
+            "helm engineer",
         ],
         "search_terms": [
             "kubernetes",
@@ -150,17 +125,14 @@ PROFILES = [
     {
         "name": "Terraform / Automation Engineer",
         "keywords": [
-            "terraform engineer",
-            "terraform developer",
-            "infrastructure automation",
-            "ansible engineer",
-            "gitops engineer",
             "terraform",
             "ansible",
             "argocd",
-            "helm",
-            "gitlab",
+            "gitops",
+            "infrastructure automation",
             "jenkins",
+            "gitlab",
+            "helm",
         ],
         "search_terms": [
             "terraform",
@@ -184,7 +156,6 @@ def is_relevant_title(title):
     return get_profile_for_title(title) is not None
 
 def build_search_list():
-    """Flat deduplicated list of {search, profile} from all profiles."""
     seen   = set()
     result = []
     for profile in PROFILES:
@@ -319,7 +290,6 @@ def get_chrome_driver():
     return driver
 
 def wait_for_react(driver, timeout=60):
-    """Wait for React root with content-based fallback."""
     try:
         WebDriverWait(driver, timeout).until(
             lambda d: d.execute_script(
@@ -348,7 +318,6 @@ def wait_for_react(driver, timeout=60):
         return 0
 
 def load_search_page(driver, search_term, retries=3):
-    """Load hiring42 search page with up to 3 retries."""
     params = urlencode({"search": search_term})
     url    = f"{JOBS_BASE_URL}?{params}"
     for attempt in range(1, retries + 1):
@@ -367,7 +336,6 @@ def load_search_page(driver, search_term, retries=3):
     return 0
 
 def scroll_all(driver):
-    """Scroll to bottom to load all lazy-loaded job cards."""
     time.sleep(1)
     last_height = driver.execute_script("return document.body.scrollHeight")
     no_change   = 0
@@ -389,7 +357,7 @@ def scroll_all(driver):
     time.sleep(0.5)
 
 # =============================================================================
-#  PAGE PARSER
+#  PAGE PARSER  —  FIX: scan ALL lines in block for title, don't break early
 # =============================================================================
 def parse_jobs_from_page(driver, seen_emails, profile):
     """
@@ -436,7 +404,9 @@ def parse_jobs_from_page(driver, seen_emails, profile):
         if any(skip in email_addr for skip in SKIP_EMAILS):
             continue
 
-        # Title = first meaningful line; must match profile keywords
+        # ---------------------------------------------------------------
+        # FIX: iterate ALL lines to find title — do NOT break on irrelevant
+        # ---------------------------------------------------------------
         title = None
         for line in block:
             if not line:
@@ -449,6 +419,7 @@ def parse_jobs_from_page(driver, seen_emails, profile):
                 continue
             if INLINE_NOISE.match(line):
                 continue
+            # Skip US state/city lines like "Atlanta, GA" or "Albany, NY"
             if re.match(r'^[A-Za-z\s\.\-]+,\s*[A-Z]{2}$', line):
                 continue
             if is_bad_title(line):
@@ -457,22 +428,26 @@ def parse_jobs_from_page(driver, seen_emails, profile):
             if is_relevant_title(line):
                 title = line
                 break
-            log.info("  SKIP irrelevant title: %s", line[:60])
-            break
+            # ← OLD CODE had `break` here — REMOVED so we keep scanning
+            log.info("  SKIP irrelevant line: %s", line[:60])
 
         if not title:
             log.info("  NO relevant title for: %s", email_addr)
             continue
 
+        matched_profile = get_profile_for_title(title)
+        if matched_profile is None:
+            matched_profile = profile
+
         seen_emails.add(email_addr)
         jobs.append({
             "title":        title,
             "email":        email_addr,
-            "cc_secret":    profile["cc_secret"],
-            "resume_file":  profile["resume_file"],
-            "profile_name": profile["name"],
+            "cc_secret":    matched_profile["cc_secret"],
+            "resume_file":  matched_profile["resume_file"],
+            "profile_name": matched_profile["name"],
         })
-        log.info("  MATCH [%s]: %s -> %s", profile["name"], title[:50], email_addr)
+        log.info("  MATCH [%s]: %s -> %s", matched_profile["name"], title[:50], email_addr)
 
     return jobs
 
