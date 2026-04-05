@@ -25,22 +25,19 @@ def get_today_date():
     return str(date.today())
 
 def get_valid_posted_strings():
-    """
-    Site format: 'Posted: Apr 4, 26' or 'Posted: Apr 04, 26'
-    We generate both zero-padded and non-zero-padded for today and yesterday.
-    """
     valid = []
     for delta in [0, 1]:
         d = datetime.now() - timedelta(days=delta)
-        # With leading zero: Apr 04, 26
         valid.append("Posted: " + d.strftime("%b %d, %y"))
-        # Without leading zero: Apr 4, 26
-        valid.append("Posted: " + d.strftime("%b %-d, %y"))
+        try:
+            valid.append("Posted: " + d.strftime("%b %-d, %y"))
+        except Exception:
+            # Windows doesn't support %-d
+            valid.append("Posted: " + d.strftime("%b %#d, %y"))
     return list(set(valid))
 
 def is_posted_recently(card_text):
-    valid_dates = get_valid_posted_strings()
-    return any(d in card_text for d in valid_dates)
+    return any(d in card_text for d in get_valid_posted_strings())
 
 def load_daily_dedup():
     if DEDUP_FILE.exists():
@@ -74,9 +71,6 @@ def save_daily_dedup(senders, send_count=0):
         log.info("SAVED TO DEDUP: %d senders, %d/%d sent today", len(senders), send_count, MAX_DAILY_SENDS)
     except Exception as e:
         log.error("Could not save dedup file: %s", e)
-
-def is_within_run_window():
-    return True
 
 SHARED_REPLY = """Hi,
 
@@ -121,61 +115,94 @@ def get_chrome_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     driver = webdriver.Chrome(options=options)
+    # Give React SPA extra time to boot
+    driver.implicitly_wait(10)
     return driver
 
-def do_search(driver, search_term):
-    """
-    Based on screenshot: there is a text input and an orange 'Search' button.
-    We target these specifically.
-    """
+def wait_for_react(driver, timeout=30):
+    """Wait until React has rendered real content into #root."""
+    log.info("Waiting for React to render...")
     try:
-        # Wait for search input to be visible and interactable
-        search_box = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='text'], input[type='search'], input"))
+        # Wait until #root has children (React mounted)
+        WebDriverWait(driver, timeout).until(
+            lambda d: d.execute_script(
+                "return document.getElementById('root') && document.getElementById('root').children.length > 0"
+            )
         )
+        # Then wait until at least one input appears
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.TAG_NAME, "input"))
+        )
+        time.sleep(2)  # small buffer for full render
+        log.info("React fully rendered")
+        return True
+    except Exception as e:
+        log.warning("React render wait timed out: %s", e)
+        return False
+
+def do_search(driver, search_term):
+    """Find the search input and click the Search button."""
+    # Wait for the input to be clickable
+    try:
+        search_box = WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "input"))
+        )
+    except Exception as e:
+        log.warning("Search box not clickable: %s", e)
+        return False
+
+    try:
         driver.execute_script("arguments[0].scrollIntoView(true);", search_box)
         time.sleep(0.5)
+        # Clear via JS then click and type
         driver.execute_script("arguments[0].value = '';", search_box)
         search_box.click()
         time.sleep(0.3)
         search_box.send_keys(search_term)
-        time.sleep(0.5)
+        time.sleep(0.8)
         log.info("Typed '%s' into search box", search_term)
     except Exception as e:
         log.warning("Could not type in search box: %s", e)
         return False
 
-    # Click the orange Search button specifically
+    # Click the orange Search button by visible text
     try:
-        # Try by button text "Search"
         buttons = driver.find_elements(By.TAG_NAME, "button")
         for btn in buttons:
-            if btn.text.strip().lower() == "search" and btn.is_displayed():
-                driver.execute_script("arguments[0].click();", btn)
-                log.info("Clicked 'Search' button by text")
-                return True
+            try:
+                btn_text = btn.text.strip().lower()
+                if btn_text == "search" and btn.is_displayed():
+                    driver.execute_script("arguments[0].click();", btn)
+                    log.info("Clicked 'Search' button")
+                    return True
+            except Exception:
+                continue
     except Exception as e:
-        log.warning("Search button by text failed: %s", e)
+        log.warning("Search button click failed: %s", e)
 
-    # Fallback: submit button or Enter
-    try:
-        submit = driver.find_element(By.CSS_SELECTOR, "button[type='submit'], input[type='submit']")
-        driver.execute_script("arguments[0].click();", submit)
-        log.info("Clicked submit button")
-        return True
-    except Exception:
-        pass
-
+    # Fallback: Enter key
     try:
         search_box.send_keys(Keys.RETURN)
         log.info("Pressed Enter to search")
         return True
     except Exception as e:
-        log.warning("Enter key failed: %s", e)
+        log.warning("Enter fallback failed: %s", e)
         return False
 
+def wait_for_results(driver):
+    """Wait until job results appear after search."""
+    try:
+        # Wait for email-like text to appear in page body
+        WebDriverWait(driver, 20).until(
+            lambda d: "@" in d.find_element(By.TAG_NAME, "body").text
+        )
+        time.sleep(2)
+        log.info("Job results loaded")
+    except Exception:
+        log.warning("Could not confirm results loaded — proceeding anyway")
+        time.sleep(4)
+
 def scroll_all(driver, search_term):
-    """Scroll to bottom repeatedly to load all lazy-loaded job cards."""
     last_height = driver.execute_script("return document.body.scrollHeight")
     scroll_attempts = 0
     while scroll_attempts < 30:
@@ -189,91 +216,66 @@ def scroll_all(driver, search_term):
     log.info("Scrolled %d times for: %s", scroll_attempts, search_term)
 
 def scrape_jobs(driver, search_term, seen_emails, cc_secret):
-    """
-    From the screenshot, each job card contains:
-    - Job title (bold text)
-    - Location
-    - Email address
-    - Posted: Apr 04, 26, HH:MM am/pm
-    - Score badge
-    We scrape all visible cards matching today/yesterday date.
-    """
     jobs = []
     email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+    valid_dates = get_valid_posted_strings()
+    log.info("Date filter active: %s", valid_dates)
 
-    # From screenshot, job rows appear to be inside a container
-    # Try specific job card selectors first, then fall back to broad
+    # Try progressively more specific selectors
     card_selectors = [
-        "div.job-card",
-        "div.job-listing",
-        "div.job-item",
-        "div.card",
-        "li.job",
-        "tr",
         "div[class*='job']",
         "div[class*='card']",
         "div[class*='listing']",
-        "div, li, article",  # broad fallback
+        "div[class*='result']",
+        "li",
+        "article",
+        "tr",
+        "div",
     ]
 
     job_cards = []
     for selector in card_selectors:
         try:
-            cards = driver.find_elements(By.CSS_SELECTOR, selector)
-            # Check if any card has an email — if yes, use this selector
-            sample_with_email = [
-                c for c in cards[:50]
-                if email_pattern.search(c.text)
-            ]
-            if sample_with_email:
-                job_cards = cards
-                log.info("Using card selector: '%s' (%d total cards)", selector, len(cards))
+            candidates = driver.find_elements(By.CSS_SELECTOR, selector)
+            with_email = [c for c in candidates if email_pattern.search(c.text or "")]
+            if with_email:
+                job_cards = candidates
+                log.info("Card selector '%s': %d total, %d with emails", selector, len(candidates), len(with_email))
                 break
         except Exception:
             continue
 
     if not job_cards:
-        log.warning("No job cards found with any selector")
+        # Last resort: scrape entire body text for emails+dates
+        log.warning("No card elements found — scraping raw body text")
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        log.info("Body text sample:\n%s", body_text[:2000])
         return jobs
-
-    valid_dates = get_valid_posted_strings()
-    log.info("Date strings to match: %s", valid_dates)
 
     for card in job_cards:
         try:
             text = card.text.strip()
             if not text or len(text) < 15:
                 continue
-
-            # Check date filter
             if not is_posted_recently(text):
                 continue
-
             emails_found = email_pattern.findall(text)
             if not emails_found:
                 continue
-
             email_addr = emails_found[0].lower()
             if email_addr in seen_emails:
                 continue
             if any(skip in email_addr for skip in SKIP_EMAILS):
                 continue
-
             lines = [l.strip() for l in text.split('\n') if l.strip()]
             title = lines[0] if lines else search_term
-
             seen_emails.add(email_addr)
-            jobs.append({
-                "title": title,
-                "email": email_addr,
-                "cc_secret": cc_secret,
-            })
-            log.info("Found job: %s -> %s", title[:60], email_addr)
-
+            jobs.append({"title": title, "email": email_addr, "cc_secret": cc_secret})
+            log.info("Found: %s -> %s", title[:60], email_addr)
         except Exception:
             continue
 
-    log.info("Found %d new jobs for: %s", len(jobs), search_term)
+    log.info("Total new jobs found for '%s': %d", search_term, len(jobs))
     return jobs
 
 def search_and_scrape(driver, search_term, seen_emails, cc_secret):
@@ -282,20 +284,23 @@ def search_and_scrape(driver, search_term, seen_emails, cc_secret):
         log.info("=" * 50)
         log.info("Searching for: %s", search_term)
         driver.get(JOBS_URL)
-        time.sleep(4)
+
+        # CRITICAL: wait for React SPA to fully render
+        if not wait_for_react(driver):
+            log.error("React did not render for: %s — skipping", search_term)
+            return jobs
 
         success = do_search(driver, search_term)
         if not success:
-            log.warning("Search submission failed for: %s", search_term)
+            log.warning("Search failed for: %s", search_term)
             return jobs
-        time.sleep(5)  # wait for results to load
 
+        wait_for_results(driver)
         scroll_all(driver, search_term)
         jobs = scrape_jobs(driver, search_term, seen_emails, cc_secret)
 
     except Exception as e:
         log.error("search_and_scrape error for '%s': %s", search_term, e, exc_info=True)
-
     return jobs
 
 def get_resume():
@@ -369,11 +374,6 @@ def main():
     log.info("Time      : %s", datetime.now().isoformat())
     log.info("=" * 70)
 
-    if not is_within_run_window():
-        log.info("Outside run window. Skipping.")
-        return
-    log.info("Proceeding...")
-
     required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD"]
     missing = [r for r in required if not os.environ.get(r)]
     if missing:
@@ -412,12 +412,10 @@ def main():
             for job in jobs:
                 if daily_send_count >= MAX_DAILY_SENDS:
                     break
-
                 email_addr = job["email"]
                 if email_addr in replied_senders:
                     log.info("SKIPPING - already sent to %s today", email_addr)
                     continue
-
                 try:
                     log.info("SENDING to %s for: %s", email_addr, job["title"][:60])
                     send_email(job, smtp_server, job["cc_secret"])
@@ -445,12 +443,11 @@ def main():
 
     try:
         smtp_server.quit()
-        log.info("SMTP connection closed")
     except Exception:
         pass
 
     log.info("=" * 70)
-    log.info("Done - Sent to %d recruiters from hiring42.com", sent)
+    log.info("Done - Sent to %d recruiters", sent)
     log.info("Daily sends : %d/%d", daily_send_count, MAX_DAILY_SENDS)
     log.info("=" * 70)
 
