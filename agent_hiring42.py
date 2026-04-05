@@ -1,4 +1,4 @@
-import os, base64, logging, re, smtplib, time, json
+﻿import os, base64, logging, re, smtplib, time, json
 from pathlib import Path
 from datetime import datetime, date, time as dtime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -9,6 +9,8 @@ import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
@@ -81,61 +83,19 @@ Lingaraju Modhala
 Phone: +1 940 281 5324
 Email: rajumodhala777@gmail.com"""
 
-ROLES = [
-    {
-        "name": "DevOps Engineer",
-        "keywords": [
-            "devops engineer","sr. devops","sr devops","senior devops",
-            "lead devops","devsecops","dev ops","ci/cd engineer",
-            "build and release","release engineer","pipeline engineer","devops ai engineer","sr. devops lead","sr devops lead","devops engineer \(aws\)","devops engineer- level","devops lead","aws devops engineer",
-        ],
-        "resume_file": "resume_lingaraju_b64.txt",
-        "cc_secret": "CC_DEVOPS",
-        "reply": SHARED_REPLY,
-    },
-    {
-        "name": "Cloud Engineer",
-        "keywords": [
-            "cloud engineer","cloud architect","cloud infrastructure",
-            "aws cloud engineer","aws engineer","aws architect","aws devops",
-            "azure cloud engineer","azure engineer","azure architect",
-            "azure devops engineer","gcp engineer","gcp architect",
-            "platform engineer","infrastructure engineer",
-        ],
-        "resume_file": "resume_lingaraju_b64.txt",
-        "cc_secret": "CC_CLOUD",
-        "reply": SHARED_REPLY,
-    },
-    {
-        "name": "Site Reliability Engineer",
-        "keywords": [
-            "site reliability engineer","site reliability","sre engineer",
-            "sr. sre","senior sre","lead sre","sre lead","reliability engineer",
-        ],
-        "resume_file": "resume_lingaraju_b64.txt",
-        "cc_secret": "CC_SRE",
-        "reply": SHARED_REPLY,
-    },
-    {
-        "name": "Kubernetes / Docker Engineer",
-        "keywords": [
-            "kubernetes engineer","kubernetes developer","k8s engineer",
-            "docker engineer","openshift engineer","container engineer","helm engineer",
-        ],
-        "resume_file": "resume_lingaraju_b64.txt",
-        "cc_secret": "CC_DEVOPS",
-        "reply": SHARED_REPLY,
-    },
-    {
-        "name": "Terraform / Automation Engineer",
-        "keywords": [
-            "terraform engineer","terraform developer","infrastructure automation",
-            "ansible engineer","gitops engineer",
-        ],
-        "resume_file": "resume_lingaraju_b64.txt",
-        "cc_secret": "CC_DEVOPS",
-        "reply": SHARED_REPLY,
-    },
+SEARCH_KEYWORDS = [
+    {"search": "devops", "cc_secret": "CC_DEVOPS"},
+    {"search": "cloud engineer", "cc_secret": "CC_CLOUD"},
+    {"search": "sre", "cc_secret": "CC_SRE"},
+    {"search": "site reliability", "cc_secret": "CC_SRE"},
+    {"search": "kubernetes", "cc_secret": "CC_DEVOPS"},
+    {"search": "terraform", "cc_secret": "CC_DEVOPS"},
+    {"search": "devops engineer", "cc_secret": "CC_DEVOPS"},
+    {"search": "aws engineer", "cc_secret": "CC_CLOUD"},
+    {"search": "azure engineer", "cc_secret": "CC_CLOUD"},
+    {"search": "gcp engineer", "cc_secret": "CC_CLOUD"},
+    {"search": "platform engineer", "cc_secret": "CC_DEVOPS"},
+    {"search": "infrastructure engineer", "cc_secret": "CC_DEVOPS"},
 ]
 
 SKIP_EMAILS = [
@@ -156,27 +116,34 @@ def get_chrome_driver():
     driver = webdriver.Chrome(options=options)
     return driver
 
-def detect_role(title):
-    title_lower = title.lower()
-    for role in ROLES:
-        if any(kw in title_lower for kw in role["keywords"]):
-            log.info("Matched role: %s for title: %s", role["name"], title)
-            return role
-    return None
-
-def scrape_jobs():
-    valid_dates = get_valid_posted_strings()
-    log.info("Launching Chrome headless browser...")
-    log.info("Date filter: %s", " OR ".join(valid_dates))
-    driver = get_chrome_driver()
+def search_and_scrape(driver, search_term, seen_emails):
     jobs = []
     try:
+        log.info("Searching for: %s", search_term)
         driver.get(JOBS_URL)
-        log.info("Opened: %s", JOBS_URL)
-        time.sleep(5)
+        time.sleep(3)
+
+        # Find search box and type keyword
+        try:
+            search_box = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='text'], input[type='search'], input[placeholder*='search'], input[placeholder*='Search']"))
+            )
+            search_box.clear()
+            search_box.send_keys(search_term)
+            time.sleep(1)
+
+            # Click search button
+            search_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit'], button.search, input[type='submit']")
+            search_btn.click()
+            time.sleep(4)
+        except Exception as e:
+            log.warning("Search box interaction failed: %s", e)
+            return jobs
+
+        # Scroll to load all results
         last_height = driver.execute_script("return document.body.scrollHeight")
         scroll_attempts = 0
-        while scroll_attempts < 100:
+        while scroll_attempts < 20:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
             new_height = driver.execute_script("return document.body.scrollHeight")
@@ -184,54 +151,57 @@ def scrape_jobs():
                 break
             last_height = new_height
             scroll_attempts += 1
-        log.info("Page scrolled %d times", scroll_attempts)
+        log.info("Scrolled %d times for: %s", scroll_attempts, search_term)
+
         email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
         job_cards = driver.find_elements(By.CSS_SELECTOR, "div, li, article, tr")
-        log.info("Found %d potential job elements", len(job_cards))
-        seen_emails = set()
-        skipped_old = 0
+
         for card in job_cards:
             try:
                 text = card.text.strip()
                 if not text or len(text) < 10:
                     continue
-                if False: # Date filter disabled - dedup handles duplicates
-                    skipped_old += 1
+
+                if not is_posted_recently(text):
                     continue
+
                 emails_found = email_pattern.findall(text)
                 if not emails_found:
                     continue
+
                 email_addr = emails_found[0].lower()
                 if email_addr in seen_emails:
                     continue
                 if any(skip in email_addr for skip in SKIP_EMAILS):
                     continue
+
                 lines = [l.strip() for l in text.split('\n') if l.strip()]
                 if not lines:
                     continue
                 title = lines[0]
-                role = detect_role(title)
-                if role is None:
-                    log.info("No role match for: %s", title[:50])
-                    continue
+
                 seen_emails.add(email_addr)
-                jobs.append({"title": title, "email": email_addr, "role": role})
-                log.info("Job found: %s -> %s", title[:50], email_addr)
+                jobs.append({
+                    "title": title,
+                    "email": email_addr,
+                    "cc_secret": SEARCH_KEYWORDS[0]["cc_secret"],
+                })
+                log.info("Found: %s -> %s", title[:50], email_addr)
+
             except Exception:
                 continue
-        log.info("Skipped %d old job listings", skipped_old)
-        log.info("Total matching jobs today+yesterday: %d", len(jobs))
+
+        log.info("Found %d jobs for search: %s", len(jobs), search_term)
+
     except Exception as e:
-        log.error("Scraping error: %s", e)
-    finally:
-        driver.quit()
-        log.info("Browser closed")
+        log.error("Search error for '%s': %s", search_term, e)
+
     return jobs
 
-def get_resume(role):
-    fname = role["resume_file"]
+def get_resume():
+    fname = "resume_lingaraju_b64.txt"
     if not Path(fname).exists():
-        raise ValueError("Resume file '{}' not found!".format(fname))
+        raise ValueError("Resume file not found!")
     raw = Path(fname).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         text = raw.decode('utf-16').strip()
@@ -245,11 +215,10 @@ def get_resume(role):
         b64 += "=" * (4 - missing)
     return base64.b64decode(b64)
 
-def send_email(job, smtp_server):
+def send_email(job, smtp_server, cc_secret):
     smtp_email = os.environ["SMTP_EMAIL"]
     to_email = job["email"]
-    role = job["role"]
-    cc_email = os.environ.get(role["cc_secret"], "")
+    cc_email = os.environ.get(cc_secret, "")
     subject = "Re: " + job["title"]
     msg = MIMEMultipart()
     msg["From"] = smtp_email
@@ -257,8 +226,8 @@ def send_email(job, smtp_server):
     msg["Subject"] = subject
     if cc_email:
         msg["Cc"] = cc_email
-    msg.attach(MIMEText(role["reply"], "plain"))
-    resume_bytes = get_resume(role)
+    msg.attach(MIMEText(SHARED_REPLY, "plain"))
+    resume_bytes = get_resume()
     part = MIMEBase("application", "vnd.openxmlformats-officedocument.wordprocessingml.document")
     part.set_payload(resume_bytes)
     encoders.encode_base64(part)
@@ -277,16 +246,15 @@ def send_email(job, smtp_server):
         log.info("CCd       : %s", cc_email)
     time.sleep(5)
 
-def log_sent(job):
+def log_sent(job, cc_secret):
     csv_path = "logs/sent_log_hiring42.csv"
     is_new = not os.path.exists(csv_path)
     with open(csv_path, "a") as f:
         if is_new:
-            f.write("timestamp,role,email,title,cc\n")
-        cc = os.environ.get(job["role"]["cc_secret"], "none")
-        f.write('{},"{}", "{}","{}","{}"\n'.format(
+            f.write("timestamp,email,title,cc\n")
+        cc = os.environ.get(cc_secret, "none")
+        f.write('{}, "{}","{}","{}"\n'.format(
             datetime.now().isoformat(),
-            job["role"]["name"],
             job["email"],
             job["title"],
             cc
@@ -300,25 +268,25 @@ def main():
     log.info("Date filter : %s", " OR ".join(get_valid_posted_strings()))
     log.info("Time      : %s", datetime.now().isoformat())
     log.info("=" * 70)
+
     if not is_within_run_window():
         log.info("Outside run window. Skipping.")
         return
     log.info("Proceeding...")
+
     required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD"]
     missing = [r for r in required if not os.environ.get(r)]
     if missing:
         log.error("Missing env vars: %s", ", ".join(missing))
         return
+
     replied_senders, daily_send_count = load_daily_dedup()
     remaining = MAX_DAILY_SENDS - daily_send_count
     log.info("Daily budget: %d/%d used, %d remaining", daily_send_count, MAX_DAILY_SENDS, remaining)
     if remaining <= 0:
         log.warning("Daily limit reached. Stopping.")
         return
-    jobs = scrape_jobs()
-    if not jobs:
-        log.info("No matching jobs found.")
-        return
+
     smtp_email = os.environ["SMTP_EMAIL"]
     smtp_server = None
     try:
@@ -328,37 +296,59 @@ def main():
     except Exception as e:
         log.error("Could not connect to SMTP: %s", e)
         return
+
+    driver = get_chrome_driver()
+    seen_emails = set(replied_senders)
     sent = 0
-    for job in jobs:
-        try:
-            email_addr = job["email"]
-            if email_addr in replied_senders:
-                log.info("SKIPPING - already sent to %s today", email_addr)
-                continue
+
+    try:
+        for kw in SEARCH_KEYWORDS:
             if daily_send_count >= MAX_DAILY_SENDS:
                 log.warning("DAILY LIMIT REACHED. Stopping.")
                 break
-            log.info("SENDING to %s for: %s", email_addr, job["title"][:50])
-            send_email(job, smtp_server)
-            log_sent(job)
-            replied_senders.add(email_addr)
-            daily_send_count += 1
-            sent += 1
-            save_daily_dedup(replied_senders, daily_send_count)
-        except Exception as e:
-            log.error("Error sending to %s: %s", job.get("email"), e, exc_info=True)
-            try:
-                smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-                smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
-                log.info("SMTP reconnected")
-            except Exception as se:
-                log.error("SMTP reconnect failed: %s", se)
-                break
+
+            jobs = search_and_scrape(driver, kw["search"], seen_emails)
+
+            for job in jobs:
+                if daily_send_count >= MAX_DAILY_SENDS:
+                    break
+
+                email_addr = job["email"]
+                if email_addr in replied_senders:
+                    log.info("SKIPPING - already sent to %s today", email_addr)
+                    continue
+
+                try:
+                    log.info("SENDING to %s for: %s", email_addr, job["title"][:50])
+                    send_email(job, smtp_server, kw["cc_secret"])
+                    log_sent(job, kw["cc_secret"])
+                    replied_senders.add(email_addr)
+                    daily_send_count += 1
+                    sent += 1
+                    save_daily_dedup(replied_senders, daily_send_count)
+                except Exception as e:
+                    log.error("Error sending to %s: %s", email_addr, e, exc_info=True)
+                    try:
+                        smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+                        smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
+                        log.info("SMTP reconnected")
+                    except Exception as se:
+                        log.error("SMTP reconnect failed: %s", se)
+                        break
+
+    finally:
+        try:
+            driver.quit()
+            log.info("Browser closed")
+        except Exception:
+            pass
+
     try:
         smtp_server.quit()
         log.info("SMTP connection closed")
     except Exception:
         pass
+
     log.info("=" * 70)
     log.info("Done - Sent to %d recruiters from hiring42.com", sent)
     log.info("Daily sends : %d/%d", daily_send_count, MAX_DAILY_SENDS)
@@ -367,7 +357,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
