@@ -48,104 +48,52 @@ PROFILES = [
     {
         "name": "DevOps Engineer",
         "keywords": [
-            "devops",          # catches DevOps AI Engineer, DevOps Engineer (AWS), Sr. DevOps Lead, etc.
-            "devsecops",
-            "dev ops",
-            "ci/cd",
-            "build and release",
-            "release engineer",
-            "pipeline engineer",
+            "devops", "devsecops", "dev ops",
+            "ci/cd", "build and release", "release engineer", "pipeline engineer",
         ],
-        "search_terms": [
-            "devops",
-            "devsecops",
-            "ci/cd engineer",
-            "build and release",
-            "pipeline engineer",
-        ],
+        "search_terms": ["devops", "devsecops", "ci/cd engineer", "build and release", "pipeline engineer"],
         "resume_file": "resume_lingaraju_b64.txt",
         "cc_secret":   "CC_DEVOPS",
     },
     {
         "name": "Cloud Engineer",
         "keywords": [
-            "cloud engineer",
-            "cloud architect",
-            "cloud infrastructure",
-            "aws",
-            "azure",
-            "gcp",
-            "platform engineer",
-            "infrastructure engineer",
+            "cloud engineer", "cloud architect", "cloud infrastructure",
+            "aws", "azure", "gcp", "platform engineer", "infrastructure engineer",
         ],
-        "search_terms": [
-            "cloud engineer",
-            "aws engineer",
-            "azure engineer",
-            "gcp engineer",
-            "platform engineer",
-            "infrastructure engineer",
-            "cloud architect",
-        ],
+        "search_terms": ["cloud engineer", "aws engineer", "azure engineer", "gcp engineer",
+                         "platform engineer", "infrastructure engineer", "cloud architect"],
         "resume_file": "resume_lingaraju_b64.txt",
         "cc_secret":   "CC_CLOUD",
     },
     {
         "name": "Site Reliability Engineer",
-        "keywords": [
-            "site reliability",
-            "sre",
-            "reliability engineer",
-        ],
-        "search_terms": [
-            "sre",
-            "site reliability",
-        ],
+        "keywords": ["site reliability", "sre", "reliability engineer"],
+        "search_terms": ["sre", "site reliability"],
         "resume_file": "resume_lingaraju_b64.txt",
         "cc_secret":   "CC_SRE",
     },
     {
         "name": "Kubernetes / Container Engineer",
-        "keywords": [
-            "kubernetes",
-            "k8s",
-            "docker",
-            "openshift",
-            "container engineer",
-            "helm engineer",
-        ],
-        "search_terms": [
-            "kubernetes",
-            "docker",
-            "openshift",
-        ],
+        "keywords": ["kubernetes", "k8s", "docker", "openshift", "container engineer", "helm engineer"],
+        "search_terms": ["kubernetes", "docker", "openshift"],
         "resume_file": "resume_lingaraju_b64.txt",
         "cc_secret":   "CC_DEVOPS",
     },
     {
         "name": "Terraform / Automation Engineer",
-        "keywords": [
-            "terraform",
-            "ansible",
-            "argocd",
-            "gitops",
-            "infrastructure automation",
-            "jenkins",
-            "gitlab",
-            "helm",
-        ],
-        "search_terms": [
-            "terraform",
-            "ansible",
-            "jenkins",
-        ],
+        "keywords": ["terraform", "ansible", "argocd", "gitops",
+                     "infrastructure automation", "jenkins", "gitlab", "helm"],
+        "search_terms": ["terraform", "ansible", "jenkins"],
         "resume_file": "resume_lingaraju_b64.txt",
         "cc_secret":   "CC_DEVOPS",
     },
 ]
 
+# =============================================================================
+#  PROFILE MATCHING
+# =============================================================================
 def get_profile_for_title(title):
-    """Return best matching profile for a job title, or None."""
     t = title.lower()
     for profile in PROFILES:
         if any(kw in t for kw in profile["keywords"]):
@@ -156,8 +104,7 @@ def is_relevant_title(title):
     return get_profile_for_title(title) is not None
 
 def build_search_list():
-    seen   = set()
-    result = []
+    seen, result = set(), []
     for profile in PROFILES:
         for term in profile["search_terms"]:
             if term not in seen:
@@ -166,23 +113,23 @@ def build_search_list():
     return result
 
 # =============================================================================
-#  DATE HELPERS
+#  DATE HELPERS  —  TODAY ONLY
 # =============================================================================
 def get_today_date():
     return str(date.today())
 
 def get_valid_posted_strings():
-    valid = []
-    for delta in [0, 1]:
-        d = datetime.now() - timedelta(days=delta)
-        valid.append("Posted: " + d.strftime("%b %d, %y"))
-        try:
-            valid.append("Posted: " + d.strftime("%b %-d, %y"))
-        except Exception:
-            valid.append("Posted: " + d.strftime("%b %#d, %y"))
-    return list(set(valid))
+    """Today's date in both zero-padded and non-padded formats."""
+    d = datetime.now()
+    valid = set()
+    valid.add("Posted: " + d.strftime("%b %d, %y"))   # e.g. Apr 05, 26
+    try:
+        valid.add("Posted: " + d.strftime("%b %-d, %y"))  # e.g. Apr 5, 26 (Linux)
+    except Exception:
+        valid.add("Posted: " + d.strftime("%b %#d, %y"))  # Windows fallback
+    return list(valid)
 
-def is_posted_recently(text):
+def is_posted_today(text):
     return any(d in text for d in get_valid_posted_strings())
 
 # =============================================================================
@@ -196,7 +143,7 @@ def load_daily_dedup():
                 if data.get("date") == get_today_date():
                     senders    = set(data.get("senders", []))
                     send_count = data.get("send_count", 0)
-                    log.info("TODAY (%s): %d senders, %d/%d sent",
+                    log.info("TODAY (%s): %d senders already replied, %d/%d sent",
                              get_today_date(), len(senders), send_count, MAX_DAILY_SENDS)
                     return senders, send_count
                 else:
@@ -207,11 +154,7 @@ def load_daily_dedup():
     return set(), 0
 
 def save_daily_dedup(senders, send_count=0):
-    data = {
-        "date":       get_today_date(),
-        "senders":    sorted(list(senders)),
-        "send_count": send_count,
-    }
+    data = {"date": get_today_date(), "senders": sorted(list(senders)), "send_count": send_count}
     with open(DEDUP_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     log.info("SAVED: %d senders, %d sent today", len(senders), send_count)
@@ -266,7 +209,7 @@ def is_bad_title(title):
     return False
 
 # =============================================================================
-#  SELENIUM / BROWSER HELPERS
+#  SELENIUM HELPERS
 # =============================================================================
 def get_chrome_driver():
     options = Options()
@@ -336,6 +279,7 @@ def load_search_page(driver, search_term, retries=3):
     return 0
 
 def scroll_all(driver):
+    """Scroll full page so all lazy-loaded cards are visible."""
     time.sleep(1)
     last_height = driver.execute_script("return document.body.scrollHeight")
     no_change   = 0
@@ -357,56 +301,63 @@ def scroll_all(driver):
     time.sleep(0.5)
 
 # =============================================================================
-#  PAGE PARSER  —  FIX: scan ALL lines in block for title, don't break early
+#  PAGE PARSER  —  generator: yields one matched job at a time
 # =============================================================================
-def parse_jobs_from_page(driver, seen_emails, profile):
+def iter_jobs_from_page(driver, seen_emails):
     """
-    Parse job cards from hiring42 page body text.
-    Card layout:
+    Scans ALL job blocks on the page.
+    Yields only jobs posted TODAY that match a profile.
+    seen_emails is updated immediately on each yield to prevent duplicates.
+
+    Block layout in body text:
         <Job Title>
-        <C2C> <W2> <ONSITE> <ALL> <N YRS>   (badge tokens)
+        <badge tokens: C2C  W2  ONSITE  ALL  N YRS>
         <City, ST>
         <email@domain.com>
-        Posted: Mmm DD, YY, HH:MM am/pm      <- block boundary
+        Posted: Mmm DD, YY, HH:MM am/pm   ← block boundary
         Score: X.XX
         ACTIVE
     """
-    jobs          = []
-    email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
-    body_text     = driver.find_element(By.TAG_NAME, "body").text
+    email_pat = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+    body_text = driver.find_element(By.TAG_NAME, "body").text
     log.info("@ symbols on page: %d", body_text.count("@"))
 
     lines = [l.strip() for l in body_text.split('\n') if l.strip()]
 
-    # Each block ends at the "Posted:" line
-    job_blocks = []
-    current    = []
+    # Split body into blocks — each block ends at "Posted:" line
+    job_blocks, current = [], []
     for line in lines:
         current.append(line)
         if re.match(r'^Posted:', line, re.IGNORECASE):
             job_blocks.append(current[:])
             current = []
 
-    log.info("Job blocks found: %d", len(job_blocks))
+    log.info("Total blocks on page: %d", len(job_blocks))
+
+    today_total   = 0
+    matched_total = 0
 
     for block in job_blocks:
         block_text = '\n'.join(block)
 
-        if not is_posted_recently(block_text):
+        # ── Filter: today only ─────────────────────────────────────────────
+        if not is_posted_today(block_text):
             continue
+        today_total += 1
 
-        emails_found = email_pattern.findall(block_text)
-        if not emails_found:
+        # ── Extract email ──────────────────────────────────────────────────
+        emails = email_pat.findall(block_text)
+        if not emails:
             continue
-        email_addr = emails_found[0].lower()
+        email_addr = emails[0].lower()
+
         if email_addr in seen_emails:
+            log.info("  SKIP (already sent today): %s", email_addr)
             continue
         if any(skip in email_addr for skip in SKIP_EMAILS):
             continue
 
-        # ---------------------------------------------------------------
-        # FIX: iterate ALL lines to find title — do NOT break on irrelevant
-        # ---------------------------------------------------------------
+        # ── Find job title: scan ALL lines (no early break on non-match) ───
         title = None
         for line in block:
             if not line:
@@ -419,37 +370,38 @@ def parse_jobs_from_page(driver, seen_emails, profile):
                 continue
             if INLINE_NOISE.match(line):
                 continue
-            # Skip US state/city lines like "Atlanta, GA" or "Albany, NY"
             if re.match(r'^[A-Za-z\s\.\-]+,\s*[A-Z]{2}$', line):
-                continue
+                continue   # "Atlanta, GA" style lines
             if is_bad_title(line):
                 log.info("  SKIP bad title: %s", line[:60])
                 continue
             if is_relevant_title(line):
                 title = line
                 break
-            # ← OLD CODE had `break` here — REMOVED so we keep scanning
+            # ← intentionally NO break here: keep scanning next lines
             log.info("  SKIP irrelevant line: %s", line[:60])
 
         if not title:
-            log.info("  NO relevant title for: %s", email_addr)
+            log.info("  TODAY but no profile match: %s", email_addr)
             continue
 
         matched_profile = get_profile_for_title(title)
-        if matched_profile is None:
-            matched_profile = profile
+        matched_total  += 1
+        log.info("  MATCH [%s]: %s -> %s",
+                 matched_profile["name"], title[:50], email_addr)
 
+        # Mark seen immediately so duplicate blocks don't double-send
         seen_emails.add(email_addr)
-        jobs.append({
+
+        yield {
             "title":        title,
             "email":        email_addr,
             "cc_secret":    matched_profile["cc_secret"],
             "resume_file":  matched_profile["resume_file"],
             "profile_name": matched_profile["name"],
-        })
-        log.info("  MATCH [%s]: %s -> %s", matched_profile["name"], title[:50], email_addr)
+        }
 
-    return jobs
+    log.info("Page summary: %d posted today | %d matched & sent", today_total, matched_total)
 
 # =============================================================================
 #  RESUME LOADER
@@ -478,7 +430,7 @@ def send_email(job, smtp_server):
     cc_email   = os.environ.get(job["cc_secret"], "")
     subject    = "Re: " + job["title"]
 
-    msg = MIMEMultipart()
+    msg            = MIMEMultipart()
     msg["From"]    = smtp_email
     msg["To"]      = to_email
     msg["Subject"] = subject
@@ -504,7 +456,6 @@ def send_email(job, smtp_server):
     smtp_server.sendmail(smtp_email, recipients, msg.as_string())
     log.info(">>> SENT [%s]: %s | Subject: %s",
              job.get("profile_name", ""), to_email, subject)
-    time.sleep(5)
 
 def log_sent(job):
     csv_path = "logs/sent_log_hiring42.csv"
@@ -515,45 +466,30 @@ def log_sent(job):
         cc = os.environ.get(job["cc_secret"], "none")
         f.write('{}, "{}","{}","{}","{}"\n'.format(
             datetime.now().isoformat(),
-            job["email"],
-            job["title"],
-            job.get("profile_name", ""),
-            cc,
+            job["email"], job["title"],
+            job.get("profile_name", ""), cc,
         ))
 
 # =============================================================================
-#  SEND LOOP
+#  SMTP HELPERS
 # =============================================================================
-def send_jobs(jobs, replied_senders, daily_send_count, smtp_server, sent):
-    smtp_email = os.environ["SMTP_EMAIL"]
-    for job in jobs:
-        if daily_send_count >= MAX_DAILY_SENDS:
-            log.warning("DAILY LIMIT REACHED.")
-            break
-        email_addr = job["email"]
-        if email_addr in replied_senders:
-            log.info("SKIP (already sent today): %s", email_addr)
-            continue
-        try:
-            log.info("SENDING [%d/%d]: %s -> %s",
-                     daily_send_count + 1, MAX_DAILY_SENDS,
-                     job["title"][:45], email_addr)
-            send_email(job, smtp_server)
-            log_sent(job)
-            replied_senders.add(email_addr)
-            daily_send_count += 1
-            sent             += 1
-            save_daily_dedup(replied_senders, daily_send_count)
-        except Exception as e:
-            log.error("Send error %s: %s", email_addr, e)
-            try:
-                smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-                smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
-                log.info("SMTP reconnected")
-            except Exception as se:
-                log.error("SMTP reconnect failed: %s", se)
-                break
-    return replied_senders, daily_send_count, sent, smtp_server
+def connect_smtp():
+    server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+    server.login(os.environ["SMTP_EMAIL"], os.environ["SMTP_APP_PASSWORD"])
+    return server
+
+def reconnect_smtp(old_server):
+    try:
+        old_server.quit()
+    except Exception:
+        pass
+    try:
+        server = connect_smtp()
+        log.info("SMTP reconnected")
+        return server
+    except Exception as e:
+        log.error("SMTP reconnect failed: %s", e)
+        return None
 
 # =============================================================================
 #  MAIN
@@ -561,7 +497,7 @@ def send_jobs(jobs, replied_senders, daily_send_count, smtp_server, sent):
 def main():
     log.info("=" * 70)
     log.info("AI Email Agent - Lingaraju Modhala (hiring42.com)")
-    log.info("Date filter: %s", " | ".join(get_valid_posted_strings()))
+    log.info("Today filter: %s", " | ".join(get_valid_posted_strings()))
     log.info("=" * 70)
 
     required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD"]
@@ -571,15 +507,12 @@ def main():
         return
 
     replied_senders, daily_send_count = load_daily_dedup()
-    if MAX_DAILY_SENDS - daily_send_count <= 0:
+    if daily_send_count >= MAX_DAILY_SENDS:
         log.warning("Daily limit already reached. Stopping.")
         return
 
-    smtp_email  = os.environ["SMTP_EMAIL"]
-    smtp_server = None
     try:
-        smtp_server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-        smtp_server.login(smtp_email, os.environ["SMTP_APP_PASSWORD"])
+        smtp_server = connect_smtp()
         log.info("SMTP connected")
     except Exception as e:
         log.error("SMTP failed: %s", e)
@@ -595,12 +528,12 @@ def main():
     try:
         for item in search_list:
             if daily_send_count >= MAX_DAILY_SENDS:
+                log.warning("DAILY LIMIT REACHED. Stopping.")
                 break
 
             search_term = item["search"]
-            profile     = item["profile"]
             log.info("=" * 50)
-            log.info("Searching: '%s'  [Profile: %s]", search_term, profile["name"])
+            log.info("Searching: '%s'", search_term)
 
             height = load_search_page(driver, search_term)
             if height < 1500:
@@ -609,12 +542,29 @@ def main():
 
             scroll_all(driver)
 
-            jobs = parse_jobs_from_page(driver, seen_emails, profile)
-            log.info("New jobs for '%s': %d", search_term, len(jobs))
+            # ── KEY CHANGE: send immediately on each match, don't batch ───
+            for job in iter_jobs_from_page(driver, seen_emails):
+                if daily_send_count >= MAX_DAILY_SENDS:
+                    log.warning("DAILY LIMIT REACHED mid-page. Stopping.")
+                    break
 
-            if jobs:
-                replied_senders, daily_send_count, sent, smtp_server = send_jobs(
-                    jobs, replied_senders, daily_send_count, smtp_server, sent)
+                log.info("SENDING NOW [%d/%d]: %s -> %s",
+                         daily_send_count + 1, MAX_DAILY_SENDS,
+                         job["title"][:45], job["email"])
+                try:
+                    send_email(job, smtp_server)
+                    log_sent(job)
+                    replied_senders.add(job["email"])
+                    daily_send_count += 1
+                    sent             += 1
+                    save_daily_dedup(replied_senders, daily_send_count)
+                    time.sleep(5)
+                except Exception as e:
+                    log.error("Send error %s: %s", job["email"], e)
+                    smtp_server = reconnect_smtp(smtp_server)
+                    if smtp_server is None:
+                        log.error("Cannot reconnect SMTP. Stopping.")
+                        raise SystemExit(1)
 
             time.sleep(1)
 
@@ -624,15 +574,15 @@ def main():
             log.info("Browser closed")
         except Exception:
             pass
-
-    try:
-        smtp_server.quit()
-    except Exception:
-        pass
+        try:
+            smtp_server.quit()
+        except Exception:
+            pass
 
     log.info("=" * 70)
     log.info("Done - Sent: %d | Daily total: %d/%d", sent, daily_send_count, MAX_DAILY_SENDS)
     log.info("=" * 70)
+
 
 if __name__ == "__main__":
     main()
