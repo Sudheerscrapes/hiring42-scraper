@@ -31,7 +31,16 @@ jobs:
         env:
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          HIRING42_EMAIL: ${{ secrets.HIRING42_EMAIL }}
+          HIRING42_PASSWORD: ${{ secrets.HIRING42_PASSWORD }}
           CC_DEVOPS: ${{ secrets.CC_DEVOPS }}
           CC_CLOUD: ${{ secrets.CC_CLOUD }}
           CC_SRE: ${{ secrets.CC_SRE }}
         run: python agent_hiring42.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: hiring42-logs
+          path: logs/
