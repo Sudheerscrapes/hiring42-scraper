@@ -10,8 +10,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
@@ -151,6 +149,7 @@ def do_search(driver, search_term):
 
 def scrape_results(driver, search_term, seen_emails):
     jobs = []
+    all_jobs_found = []
     try:
         last_height = driver.execute_script("return document.body.scrollHeight")
         for _ in range(20):
@@ -171,6 +170,8 @@ def scrape_results(driver, search_term, seen_emails):
             if any(d in line for d in valid_dates):
                 title = ""
                 email_addr = ""
+                location = ""
+                posted_date = line
                 for j in range(max(0, i-5), i):
                     block = blocks[j].strip()
                     emails = EMAIL_PATTERN.findall(block)
@@ -179,15 +180,53 @@ def scrape_results(driver, search_term, seen_emails):
                     elif block and len(block) > 5:
                         skip_words = ["c2c","w2","onsite","remote","hybrid","yrs","exp n/a","active","posted","score","all"]
                         if not any(x in block.lower() for x in skip_words):
-                            title = block
+                            if not location and ',' in block:
+                                location = block
+                            else:
+                                title = block
+
                 if email_addr and title:
+                    # Log ALL jobs found today/yesterday
+                    all_jobs_found.append({
+                        "title": title,
+                        "email": email_addr,
+                        "location": location,
+                        "posted": posted_date
+                    })
+
                     if email_addr not in seen_emails and not any(skip in email_addr for skip in SKIP_EMAILS):
                         seen_emails.add(email_addr)
                         jobs.append({"title": title, "email": email_addr})
-                        log.info("Found: %s -> %s", title[:50], email_addr)
+
             i += 1
 
-        log.info("Found %d jobs for '%s'", len(jobs), search_term)
+        # Save all jobs to a log file for review
+        jobs_log_path = "logs/all_jobs_found.csv"
+        is_new = not os.path.exists(jobs_log_path)
+        with open(jobs_log_path, "a", encoding="utf-8") as f:
+            if is_new:
+                f.write("timestamp,search,title,email,location,posted\n")
+            for j in all_jobs_found:
+                f.write('{}, "{}","{}","{}","{}","{}"\n'.format(
+                    datetime.now().isoformat(),
+                    search_term,
+                    j["title"],
+                    j["email"],
+                    j["location"],
+                    j["posted"]
+                ))
+
+        log.info("=" * 50)
+        log.info("ALL JOBS FOUND for search '%s':", search_term)
+        for j in all_jobs_found:
+            log.info("  TITLE : %s", j["title"])
+            log.info("  EMAIL : %s", j["email"])
+            log.info("  DATE  : %s", j["posted"])
+            log.info("  ------")
+        log.info("Total jobs today/yesterday for '%s': %d", search_term, len(all_jobs_found))
+        log.info("Matching unsent jobs: %d", len(jobs))
+        log.info("=" * 50)
+
     except Exception as e:
         log.error("Scrape error: %s", e)
     return jobs
