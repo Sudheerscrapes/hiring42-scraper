@@ -19,7 +19,9 @@ FIXES:
 12. Last 2 days window (catches evening emails from previous day)
 13. Broader keyword list - catches all common Data Engineer subject patterns
 14. Generic "Data Engineer" catch-all role (last priority)
-15. Dedup checked inside fetch loop for early exit
+15. Dedup is NOW the VERY FIRST check — fetches only From/Reply-To header
+    first, checks dedup immediately, and only fetches Subject/Message-ID
+    if the sender has NOT been replied to yet.
 """
 
 import os, base64, logging, re, smtplib, time, json
@@ -301,9 +303,28 @@ def mark_as_replied(mail, uid):
     return mail
 
 
+def mark_as_read(mail, uid):
+    """Mark the email as read (remove \\Seen flag) in the IMAP inbox."""
+    for attempt in range(3):
+        try:
+            fresh = connect_imap()
+            fresh.select("inbox")
+            fresh.store(uid, "+FLAGS", "\\Seen")
+            fresh.logout()
+            log.info("Marked as READ: uid %s", uid)
+            return mail
+        except Exception as e:
+            log.warning("Mark-as-read attempt %d failed: %s", attempt + 1, e)
+            time.sleep(2)
+    log.error("Failed to mark email as read after 3 attempts (uid %s)", uid)
+    return mail
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # FETCH MATCHING EMAILS
 # Searches READ + UNREAD, last 2 days, broad keyword list
+# DEDUP is checked FIRST — only From/Reply-To header fetched initially.
+# Subject + Message-ID are fetched only if sender is NOT in dedup.
 # ══════════════════════════════════════════════════════════════════════════════
 def fetch_matching_emails():
     log.info("Connecting to Gmail via IMAP...")
@@ -356,6 +377,40 @@ def fetch_matching_emails():
             mail = connect_imap()
 
         try:
+            # ── STEP 1: Fetch ONLY From + Reply-To (cheapest possible call)
+            #    so we can run dedup BEFORE doing any more IMAP work.
+            _, from_data = mail.fetch(
+                uid,
+                "(BODY.PEEK[HEADER.FIELDS (FROM REPLY-TO)])"
+            )
+            if not from_data or from_data[0] is None:
+                continue
+            from_raw = from_data[0][1].decode("utf-8", errors="ignore")
+
+            sender_match_quick = re.search(
+                r"From:\s*(.+?)(?:\r?\n(?!\s)|\Z)",
+                from_raw, re.IGNORECASE | re.DOTALL
+            )
+            sender_quick = sender_match_quick.group(1).strip() if sender_match_quick else ""
+
+            rt_match_quick = re.search(
+                r"Reply-To:\s*(.+?)(?:\r?\n(?!\s)|\Z)",
+                from_raw, re.IGNORECASE | re.DOTALL
+            )
+            reply_to_quick = rt_match_quick.group(1).strip() if rt_match_quick else sender_quick
+
+            # ── DEDUP CHECK — absolute first gate, before fetching Subject ──
+            sender_addr_quick = extract_address(reply_to_quick or sender_quick)
+            if sender_addr_quick and sender_addr_quick in replied_senders:
+                log.info("DEDUP SKIP (pre-fetch): %s", sender_addr_quick)
+                continue
+
+            # Skip system/own senders early too
+            if any(skip in sender_quick.lower() for skip in SKIP_SENDERS):
+                log.info("Skipping system sender (pre-fetch): %s", sender_quick[:60])
+                continue
+
+            # ── STEP 2: Now fetch full header (Subject + Message-ID) ────────
             _, hdr_data = mail.fetch(
                 uid,
                 "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REPLY-TO)])"
@@ -393,11 +448,6 @@ def fetch_matching_emails():
             )
             reply_to = rt_match.group(1).strip() if rt_match else sender
 
-            # Skip system/own senders
-            if any(skip in sender.lower() for skip in SKIP_SENDERS):
-                log.info("Skipping sender: %s", subject[:60])
-                continue
-
             # Skip already replied by Message-ID
             if message_id in replied_ids:
                 log.info("Already replied (Message-ID): %s", subject[:60])
@@ -408,7 +458,7 @@ def fetch_matching_emails():
                 log.warning("Could not extract sender email from: %s", sender)
                 continue
 
-            # Skip already replied today (dedup - early exit)
+            # Final dedup guard with fully-resolved address
             if sender_addr in replied_senders:
                 log.info("Already replied today (dedup): %s", sender_addr)
                 continue
@@ -632,6 +682,7 @@ def main():
             send_reply(email, role, smtp_server)
             log_sent(email, role)
             mail = mark_as_replied(mail, email["uid"])
+            mail = mark_as_read(mail, email["uid"])   # ← mark as READ in inbox
 
             replied_senders.add(sender_addr)
             sent_senders.add(sender_addr)
