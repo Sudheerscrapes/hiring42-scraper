@@ -1,32 +1,68 @@
-﻿name: AI Email Agent - Kartick MuleSoft
-
+name: AI Email Agent - Kartick MuleSoft
 on:
   schedule:
-    - cron: '*/15 13-23 * * *'
-    - cron: '*/15 0-23 * * *'
+    # Runs every 15 min between 6:30 PM - 4:30 AM IST (13:00 - 23:00 UTC)
+    - cron: '*/15 13-22 * * *'   # 6:30 PM to 4:29 AM IST
+    - cron: '0,15,30 23 * * *'   # 4:30 AM IST cutoff (last 3 runs)
   workflow_dispatch:
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Check IST operating window (6:30 PM – 4:30 AM)
+        id: time_check
+        run: |
+          python3 - <<'EOF'
+          from datetime import datetime, timezone, timedelta
+          import os
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+          IST = timezone(timedelta(hours=5, minutes=30))
+          now = datetime.now(IST)
+          total_minutes = now.hour * 60 + now.minute
+
+          # 6:30 PM IST = 1110 min | 4:30 AM IST = 270 min (crosses midnight)
+          in_window = total_minutes >= 1110 or total_minutes < 270
+
+          print(f"Current IST time : {now.strftime('%Y-%m-%d %H:%M:%S')}")
+          print(f"In operating window: {in_window}")
+
+          if not in_window:
+              print("Outside 6:30 PM – 4:30 AM IST window. Skipping all steps.")
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"in_window={'true' if in_window else 'false'}\n")
+          EOF
+
+      - name: Checkout code
+        if: steps.time_check.outputs.in_window == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: steps.time_check.outputs.in_window == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
+        if: steps.time_check.outputs.in_window == 'true'
         run: pip install pytz
 
       - name: Run Kartick Email Agent
+        if: steps.time_check.outputs.in_window == 'true'
         env:
-          IMAP_EMAIL: ${{ secrets.IMAP_EMAIL }}
-          IMAP_APP_PASSWORD: ${{ secrets.IMAP_APP_PASSWORD }}
-          KARTICK_SMTP_EMAIL: ${{ secrets.KARTICK_SMTP_EMAIL }}
-          KARTICK_SMTP_APP_PASSWORD: ${{ secrets.KARTICK_SMTP_APP_PASSWORD }}
-          CC_KARTICK: ${{ secrets.CC_KARTICK }}
+          IMAP_EMAIL:                   ${{ secrets.IMAP_EMAIL }}
+          IMAP_APP_PASSWORD:            ${{ secrets.IMAP_APP_PASSWORD }}
+          KARTICK_SMTP_EMAIL:           ${{ secrets.KARTICK_SMTP_EMAIL }}
+          KARTICK_SMTP_APP_PASSWORD:    ${{ secrets.KARTICK_SMTP_APP_PASSWORD }}
+          CC_KARTICK:                   ${{ secrets.CC_KARTICK }}
         run: python agent_kartick.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 30
