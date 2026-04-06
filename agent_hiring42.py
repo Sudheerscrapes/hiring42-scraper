@@ -9,6 +9,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
@@ -18,6 +20,7 @@ log = logging.getLogger(__name__)
 DEDUP_FILE = Path("logs") / "daily_replied_senders_hiring42.json"
 MAX_DAILY_SENDS = 450
 JOBS_URL = "https://www.hiring42.com/all_jobs"
+LOGIN_URL = "https://www.hiring42.com/login"
 
 def get_today_date():
     return str(date.today())
@@ -105,12 +108,90 @@ def get_chrome_driver():
     driver = webdriver.Chrome(options=options)
     return driver
 
-def detect_role(title):
-    title_lower = title.lower()
-    for role in ROLE_KEYWORDS:
-        if any(kw in title_lower for kw in role["keywords"]):
-            return role
-    return None
+def login(driver):
+    try:
+        log.info("Logging in to hiring42.com...")
+        driver.get(LOGIN_URL)
+        time.sleep(3)
+
+        # Take screenshot for debug
+        driver.save_screenshot("logs/login_page.png")
+        log.info("Login page loaded. Title: %s", driver.title)
+
+        # Find email field
+        email_field = None
+        for selector in ["input[type='email']", "input[name='email']", "input[id='email']", "input[placeholder*='email']", "input[placeholder*='Email']"]:
+            try:
+                fields = driver.find_elements(By.CSS_SELECTOR, selector)
+                for f in fields:
+                    if f.is_displayed():
+                        email_field = f
+                        break
+                if email_field:
+                    break
+            except Exception:
+                continue
+
+        if not email_field:
+            log.error("Email field not found on login page")
+            return False
+
+        email_field.clear()
+        email_field.send_keys(os.environ["HIRING42_EMAIL"])
+        log.info("Entered email")
+        time.sleep(1)
+
+        # Find password field
+        password_field = None
+        for selector in ["input[type='password']", "input[name='password']", "input[id='password']"]:
+            try:
+                fields = driver.find_elements(By.CSS_SELECTOR, selector)
+                for f in fields:
+                    if f.is_displayed():
+                        password_field = f
+                        break
+                if password_field:
+                    break
+            except Exception:
+                continue
+
+        if not password_field:
+            log.error("Password field not found on login page")
+            return False
+
+        password_field.clear()
+        password_field.send_keys(os.environ["HIRING42_PASSWORD"])
+        log.info("Entered password")
+        time.sleep(1)
+
+        # Click login button
+        login_btn = None
+        for selector in ["button[type='submit']", "input[type='submit']", "button.login", "button.btn-login", "button.sign-in"]:
+            try:
+                btns = driver.find_elements(By.CSS_SELECTOR, selector)
+                for b in btns:
+                    if b.is_displayed():
+                        login_btn = b
+                        break
+                if login_btn:
+                    break
+            except Exception:
+                continue
+
+        if login_btn:
+            login_btn.click()
+        else:
+            password_field.send_keys(Keys.RETURN)
+
+        time.sleep(5)
+        driver.save_screenshot("logs/after_login.png")
+        log.info("After login. Title: %s", driver.title)
+        log.info("After login. URL: %s", driver.current_url)
+        return True
+
+    except Exception as e:
+        log.error("Login failed: %s", e)
+        return False
 
 def scrape_all_jobs(driver):
     all_jobs = []
@@ -120,8 +201,10 @@ def scrape_all_jobs(driver):
 
     try:
         driver.get(JOBS_URL)
-        log.info("Opened: %s", JOBS_URL)
+        log.info("Opened jobs page: %s", JOBS_URL)
         time.sleep(5)
+        driver.save_screenshot("logs/jobs_page.png")
+        log.info("Jobs page title: %s", driver.title)
 
         # Scroll to load ALL jobs
         log.info("Scrolling to load all jobs...")
@@ -133,54 +216,52 @@ def scrape_all_jobs(driver):
             new_height = driver.execute_script("return document.body.scrollHeight")
             scroll_count += 1
             if new_height == last_height:
-                log.info("No more jobs to load after %d scrolls", scroll_count)
+                log.info("All jobs loaded after %d scrolls", scroll_count)
                 break
             last_height = new_height
-            if scroll_count % 10 == 0:
-                log.info("Scrolled %d times, height: %d", scroll_count, new_height)
+            if scroll_count % 5 == 0:
+                log.info("Scrolled %d times...", scroll_count)
 
         # Get full page text
         page_text = driver.find_element(By.TAG_NAME, "body").text
         blocks = page_text.split('\n')
         log.info("Total lines on page: %d", len(blocks))
 
+        # Save raw page text for debugging
+        with open("logs/page_text.txt", "w", encoding="utf-8") as f:
+            f.write(page_text)
+        log.info("Raw page text saved to logs/page_text.txt")
+
         # Parse job cards
-        # Pattern: title line, location line, email line, posted date line
         i = 0
         while i < len(blocks):
             line = blocks[i].strip()
 
-            # Check if line contains posted date
             if any(d in line for d in valid_dates):
                 title = ""
                 email_addr = ""
                 location = ""
 
-                # Look back up to 6 lines for title, location, email
                 for j in range(max(0, i-6), i):
                     block = blocks[j].strip()
                     if not block:
                         continue
 
-                    # Check for email
                     emails = EMAIL_PATTERN.findall(block)
                     if emails:
                         email_addr = emails[0].lower()
                         continue
 
-                    # Skip badge lines
                     badge_words = ["c2c","w2","onsite","remote","hybrid","yrs","exp n/a",
                                   "active","posted","score","all jobs","filters","h42",
                                   "submit your","search"]
                     if any(x in block.lower() for x in badge_words):
                         continue
 
-                    # Location has comma (City, State)
-                    if ',' in block and len(block) < 30:
+                    if ',' in block and len(block) < 40:
                         location = block
                         continue
 
-                    # Title is what remains
                     if len(block) > 3:
                         title = block
 
@@ -195,12 +276,19 @@ def scrape_all_jobs(driver):
                                 "posted": line.strip()
                             })
 
-            i += 1
+        i += 1
 
     except Exception as e:
         log.error("Scraping error: %s", e)
 
     return all_jobs
+
+def detect_role(title):
+    title_lower = title.lower()
+    for role in ROLE_KEYWORDS:
+        if any(kw in title_lower for kw in role["keywords"]):
+            return role
+    return None
 
 def get_resume():
     fname = "resume_lingaraju_b64.txt"
@@ -288,7 +376,7 @@ def main():
         log.info("Outside run window. Skipping.")
         return
 
-    required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD"]
+    required = ["SMTP_EMAIL", "SMTP_APP_PASSWORD", "HIRING42_EMAIL", "HIRING42_PASSWORD"]
     missing = [r for r in required if not os.environ.get(r)]
     if missing:
         log.error("Missing env vars: %s", ", ".join(missing))
@@ -304,6 +392,11 @@ def main():
     driver = get_chrome_driver()
     all_jobs = []
     try:
+        logged_in = login(driver)
+        if not logged_in:
+            log.error("Login failed. Cannot scrape jobs.")
+            return
+
         all_jobs = scrape_all_jobs(driver)
     finally:
         driver.quit()
@@ -313,14 +406,11 @@ def main():
     log.info("TOTAL JOBS FOUND TODAY/YESTERDAY: %d", len(all_jobs))
     log.info("=" * 70)
 
-    # Save all jobs to CSV for review
     save_all_jobs_csv(all_jobs)
 
-    # Show all jobs in log
     for j in all_jobs:
-        log.info("JOB: %-50s | EMAIL: %s | %s", j["title"][:50], j["email"], j["location"])
+        log.info("JOB: %-50s | %s | %s", j["title"][:50], j["email"], j["location"])
 
-    # Filter matching jobs
     matching_jobs = []
     for j in all_jobs:
         role = detect_role(j["title"])
