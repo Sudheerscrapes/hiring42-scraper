@@ -1,4 +1,4 @@
-﻿import os, base64, logging, re, smtplib, time, json
+import os, base64, logging, re, smtplib, time, json
 from pathlib import Path
 from datetime import datetime, date, time as dtime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -481,3 +481,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
