@@ -1,12 +1,13 @@
-name: Hiring42 Scraper
+name: Hiring42 Multi-Keyword Scraper
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch:
+    - cron: "*/15 * * * *"   # runs every 15 minutes
+  workflow_dispatch:          # allows manual run
 
 jobs:
-  run-scraper:
+
+  scrape-jobs:
 
     runs-on: ubuntu-latest
 
@@ -22,6 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install playwright
           python -m playwright install --with-deps
 
@@ -29,18 +31,16 @@ jobs:
         run: |
           python hiring42_scraper.py
 
-      - name: Verify CSV exists
+      # This step helps debug and confirm files exist
+      - name: List generated CSV files
         run: |
-          echo "Current directory:"
-          pwd
-          echo "Files in directory:"
-          ls -lh
-          echo "CSV preview:"
-          head -n 5 hiring42_jobs.csv || echo "CSV not found"
+          echo "Files created:"
+          ls -lh *.csv || echo "No CSV files found"
 
-      - name: Upload CSV artifact
+      # Upload ALL keyword files
+      - name: Upload CSV files
         uses: actions/upload-artifact@v4
         with:
           name: hiring42-results
-          path: hiring42_jobs.csv
-          if-no-files-found: error
+          path: "*.csv"
+          if-no-files-found: warn
