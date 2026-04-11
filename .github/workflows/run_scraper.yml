@@ -23,15 +23,24 @@ jobs:
       - name: Install dependencies
         run: |
           pip install playwright
-          python -m playwright install
+          python -m playwright install --with-deps
 
       - name: Run scraper
         run: |
           python hiring42_scraper.py
 
-      - name: Upload results
+      - name: Verify CSV exists
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Files in directory:"
+          ls -lh
+          echo "CSV preview:"
+          head -n 5 hiring42_jobs.csv || echo "CSV not found"
+
+      - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
         with:
           name: hiring42-results
-          path: |
-            *.csv
+          path: hiring42_jobs.csv
+          if-no-files-found: error
