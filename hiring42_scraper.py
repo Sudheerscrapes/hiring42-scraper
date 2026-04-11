@@ -3,7 +3,6 @@ import argparse
 import csv
 import os
 import re
-from datetime import datetime
 from playwright.async_api import async_playwright
 
 CSV_FILE = "hiring42_jobs.csv"
@@ -17,11 +16,22 @@ def clean(text):
 
 async def close_popup(page):
     try:
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(3000)
 
-        if await page.locator("button[aria-label='Close']").count():
-            await page.click("button[aria-label='Close']")
-            print("[+] Popup closed")
+        # Try multiple close buttons
+        buttons = [
+            "button[aria-label='Close']",
+            "text=Maybe Later",
+            "button:has-text('Close')",
+            "button:has-text('Skip')"
+        ]
+
+        for b in buttons:
+            if await page.locator(b).count():
+                await page.click(b)
+                print("[+] Popup closed")
+                await page.wait_for_timeout(2000)
+                break
 
     except:
         pass
@@ -36,7 +46,7 @@ async def open_site(page):
         timeout=60000
     )
 
-    await page.wait_for_timeout(4000)
+    await page.wait_for_timeout(5000)
 
     await close_popup(page)
 
@@ -45,7 +55,7 @@ async def open_site(page):
 
         await page.click("text=All Jobs")
 
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(4000)
 
     except:
         pass
@@ -55,10 +65,19 @@ async def search_jobs(page, keyword):
 
     print("[+] Searching:", keyword)
 
-    await page.fill(
-        "textarea",
-        keyword
+    # WAIT for search box safely
+    await page.wait_for_selector(
+        "input, textarea",
+        timeout=60000
     )
+
+    search_box = page.locator(
+        "input, textarea"
+    ).first
+
+    await search_box.fill(keyword)
+
+    await page.wait_for_timeout(1000)
 
     await page.click(
         "button:has-text('Search')"
@@ -68,7 +87,7 @@ async def search_jobs(page, keyword):
 
     await page.wait_for_selector(
         "div.rounded-2xl.border",
-        timeout=15000
+        timeout=60000
     )
 
 
@@ -116,14 +135,6 @@ async def extract_jobs(page):
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
     )
 
-    date_pattern = re.compile(
-        r"Posted:\s*(.*)"
-    )
-
-    score_pattern = re.compile(
-        r"Score:\s*([0-9.]+%)"
-    )
-
     for card in cards:
 
         try:
@@ -152,45 +163,11 @@ async def extract_jobs(page):
                     location = line
                     break
 
-            posted_date = ""
-
-            date_match = date_pattern.search(text)
-
-            if date_match:
-                posted_date = date_match.group(1)
-
-            score = ""
-
-            score_match = score_pattern.search(text)
-
-            if score_match:
-                score = score_match.group(1)
-
-            work_type = ""
-            work_mode = ""
-            experience = ""
-
-            for line in lines:
-
-                if "C2C" in line:
-                    work_type = "C2C"
-
-                if "REMOTE" in line or "ONSITE" in line:
-                    work_mode = line
-
-                if "YR" in line or "EXP" in line:
-                    experience = line
-
             jobs.append({
 
                 "title": title,
                 "location": location,
-                "email": email,
-                "work_type": work_type,
-                "work_mode": work_mode,
-                "experience": experience,
-                "posted_date": posted_date,
-                "score": score
+                "email": email
 
             })
 
@@ -207,12 +184,7 @@ def append_to_csv(jobs):
 
         "title",
         "location",
-        "email",
-        "work_type",
-        "work_mode",
-        "experience",
-        "posted_date",
-        "score"
+        "email"
 
     ]
 
@@ -249,6 +221,7 @@ def append_to_csv(jobs):
         )
 
         if os.stat(CSV_FILE).st_size == 0:
+
             writer.writeheader()
 
         for job in jobs:
