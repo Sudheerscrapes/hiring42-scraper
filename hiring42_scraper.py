@@ -18,7 +18,11 @@ KEYWORDS = [
     "sap btp",
     "sap sd",
     "sap ewm",
-    "sap mm"
+    "sap mm",
+    "dot net",
+    ".net",
+    "sap basis"
+    
 
 ]
 
