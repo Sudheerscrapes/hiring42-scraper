@@ -1,5 +1,4 @@
 import asyncio
-import argparse
 import csv
 import os
 import re
@@ -7,6 +6,21 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 
 CSV_FILE = "hiring42_jobs.csv"
+
+
+KEYWORDS = [
+
+    "sap sac",
+    "sap datasphere",
+    "sap pi",
+    "sap po",
+    "sap cpi",
+    "sap btp",
+    "sap sd",
+    "sap ewm",
+    "sap mm"
+
+]
 
 
 def clean(text):
@@ -22,10 +36,12 @@ async def close_popup(page):
         await page.wait_for_timeout(3000)
 
         buttons = [
+
             "button[aria-label='Close']",
             "text=Maybe Later",
             "button:has-text('Close')",
             "button:has-text('Skip')"
+
         ]
 
         for b in buttons:
@@ -104,7 +120,6 @@ async def extract_jobs(page):
             email_match = email_pattern.search(text)
 
             if not email_match:
-
                 continue
 
             email = email_match.group(0)
@@ -152,7 +167,6 @@ async def extract_jobs(page):
             date_match = date_pattern.search(text)
 
             if date_match:
-
                 posted_date = date_match.group(1)
 
             description = text
@@ -185,6 +199,7 @@ def append_to_csv(jobs):
 
     fields = [
 
+        "keyword",
         "title",
         "location",
         "email",
@@ -279,6 +294,7 @@ async def scrape(keyword):
             locale="en-US",
 
             timezone_id="America/New_York"
+
         )
 
         page = await context.new_page()
@@ -287,7 +303,9 @@ async def scrape(keyword):
 
         page.set_default_navigation_timeout(60000)
 
-        print("[+] Opening Hiring42")
+        print("\n==============================")
+        print("[+] Running keyword:", keyword)
+        print("==============================")
 
         await page.goto(
             "https://www.hiring42.com/",
@@ -298,8 +316,6 @@ async def scrape(keyword):
 
         await close_popup(page)
 
-        print("[+] Clicking All Jobs")
-
         try:
 
             await page.click("text=All Jobs")
@@ -309,8 +325,6 @@ async def scrape(keyword):
         except:
 
             pass
-
-        print("[+] Searching:", keyword)
 
         await page.wait_for_selector(
             "input[type='text'], textarea",
@@ -329,8 +343,6 @@ async def scrape(keyword):
             "button:has-text('Search')"
         )
 
-        print("[+] Waiting for results")
-
         await page.wait_for_selector(
             "div.rounded-2xl.border",
             timeout=60000
@@ -340,7 +352,9 @@ async def scrape(keyword):
 
         jobs = await extract_jobs(page)
 
-        print("[+] Jobs scraped:", len(jobs))
+        for j in jobs:
+
+            j["keyword"] = keyword
 
         append_to_csv(jobs)
 
@@ -349,22 +363,26 @@ async def scrape(keyword):
 
 def main():
 
-    parser = argparse.ArgumentParser()
+    print("[+] Starting multi-keyword scraping")
 
-    parser.add_argument(
-        "--keyword",
-        default="sap sac"
-    )
+    for keyword in KEYWORDS:
 
-    args = parser.parse_args()
+        try:
 
-    print("[+] Using keyword:", args.keyword)
+            asyncio.run(
+                scrape(keyword)
+            )
 
-    asyncio.run(
-        scrape(
-            args.keyword
-        )
-    )
+        except Exception as e:
+
+            print(
+                "[!] Error with keyword:",
+                keyword
+            )
+
+            print(e)
+
+    print("\n[+] All keywords completed")
 
 
 if __name__ == "__main__":
