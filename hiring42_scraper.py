@@ -1,23 +1,13 @@
 import asyncio
 import argparse
-import json
 import csv
+import os
 import re
 from datetime import datetime
 from playwright.async_api import async_playwright
 
+CSV_FILE = "hiring42_jobs.csv"
 
-# ==============================
-# DEFAULT SETTINGS
-# ==============================
-
-DEFAULT_KEYWORD = "sap sac"
-HEADLESS_MODE = False
-
-
-# ==============================
-# CLEAN TEXT
-# ==============================
 
 def clean(text):
     if not text:
@@ -25,40 +15,19 @@ def clean(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-# ==============================
-# CLOSE POPUP
-# ==============================
-
 async def close_popup(page):
-
     try:
-
         await page.wait_for_timeout(2000)
 
-        if await page.locator(
-            "button[aria-label='Close']"
-        ).count():
-
-            await page.click(
-                "button[aria-label='Close']"
-            )
-
+        if await page.locator("button[aria-label='Close']").count():
+            await page.click("button[aria-label='Close']")
             print("[+] Popup closed")
 
-        else:
-
-            print("[+] No popup detected")
-
     except:
+        pass
 
-        print("[+] Popup handling skipped")
 
-
-# ==============================
-# SEARCH
-# ==============================
-
-async def perform_search(page, keyword):
+async def open_site(page):
 
     print("[+] Opening Hiring42")
 
@@ -71,26 +40,25 @@ async def perform_search(page, keyword):
 
     await close_popup(page)
 
-    print("[+] Clicking All Jobs")
-
     try:
+        print("[+] Clicking All Jobs")
 
         await page.click("text=All Jobs")
 
         await page.wait_for_timeout(3000)
 
     except:
+        pass
 
-        print("[!] All Jobs click skipped")
 
-    print("[+] Typing keyword:", keyword)
+async def search_jobs(page, keyword):
+
+    print("[+] Searching:", keyword)
 
     await page.fill(
         "textarea",
         keyword
     )
-
-    print("[+] Clicking Search")
 
     await page.click(
         "button:has-text('Search')"
@@ -104,13 +72,9 @@ async def perform_search(page, keyword):
     )
 
 
-# ==============================
-# SCROLL
-# ==============================
-
 async def scroll_page(page):
 
-    for i in range(5):
+    for i in range(10):
 
         before = await page.evaluate(
             "document.body.scrollHeight"
@@ -134,15 +98,9 @@ async def scroll_page(page):
         )
 
         if before == after:
-
             print("[+] End of page")
-
             break
 
-
-# ==============================
-# EXTRACT JOBS
-# ==============================
 
 async def extract_jobs(page):
 
@@ -190,9 +148,7 @@ async def extract_jobs(page):
             location = ""
 
             for line in lines:
-
                 if "," in line:
-
                     location = line
                     break
 
@@ -201,7 +157,6 @@ async def extract_jobs(page):
             date_match = date_pattern.search(text)
 
             if date_match:
-
                 posted_date = date_match.group(1)
 
             score = ""
@@ -209,7 +164,6 @@ async def extract_jobs(page):
             score_match = score_pattern.search(text)
 
             if score_match:
-
                 score = score_match.group(1)
 
             work_type = ""
@@ -219,15 +173,12 @@ async def extract_jobs(page):
             for line in lines:
 
                 if "C2C" in line:
-
                     work_type = "C2C"
 
                 if "REMOTE" in line or "ONSITE" in line:
-
                     work_mode = line
 
                 if "YR" in line or "EXP" in line:
-
                     experience = line
 
             jobs.append({
@@ -239,8 +190,7 @@ async def extract_jobs(page):
                 "work_mode": work_mode,
                 "experience": experience,
                 "posted_date": posted_date,
-                "score": score,
-                "full_text": text
+                "score": score
 
             })
 
@@ -251,39 +201,7 @@ async def extract_jobs(page):
     return jobs
 
 
-# ==============================
-# DEDUPLICATE
-# ==============================
-
-def deduplicate_jobs(jobs):
-
-    seen = set()
-    unique = []
-
-    for job in jobs:
-
-        key = job["title"] + job["email"]
-
-        if key not in seen:
-
-            seen.add(key)
-            unique.append(job)
-
-    return unique
-
-
-# ==============================
-# SAVE FILES
-# ==============================
-
-def save_files(jobs, keyword):
-
-    timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
-
-    json_file = f"hiring42_{keyword}_{timestamp}.json"
-    csv_file = f"hiring42_{keyword}_{timestamp}.csv"
+def append_to_csv(jobs):
 
     fields = [
 
@@ -294,22 +212,33 @@ def save_files(jobs, keyword):
         "work_mode",
         "experience",
         "posted_date",
-        "score",
-        "full_text"
+        "score"
 
     ]
 
-    with open(json_file, "w", encoding="utf-8") as f:
+    existing_keys = set()
 
-        json.dump(
-            jobs,
-            f,
-            indent=2
-        )
+    if os.path.exists(CSV_FILE):
+
+        with open(
+            CSV_FILE,
+            newline="",
+            encoding="utf-8"
+        ) as f:
+
+            reader = csv.DictReader(f)
+
+            for row in reader:
+
+                key = row["title"] + row["email"]
+
+                existing_keys.add(key)
+
+    new_count = 0
 
     with open(
-        csv_file,
-        "w",
+        CSV_FILE,
+        "a",
         newline="",
         encoding="utf-8"
     ) as f:
@@ -319,66 +248,53 @@ def save_files(jobs, keyword):
             fieldnames=fields
         )
 
-        writer.writeheader()
+        if os.stat(CSV_FILE).st_size == 0:
+            writer.writeheader()
 
         for job in jobs:
 
-            writer.writerow(job)
+            key = job["title"] + job["email"]
 
-    return json_file, csv_file
+            if key not in existing_keys:
 
+                writer.writerow(job)
 
-# ==============================
-# MAIN SCRAPER
-# ==============================
+                new_count += 1
+
+    print("[+] New jobs appended:", new_count)
+
 
 async def scrape(keyword):
 
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-            headless=HEADLESS_MODE
+
+            headless=True,
+
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+
         )
 
         page = await browser.new_page()
 
-        await perform_search(page, keyword)
+        await open_site(page)
+
+        await search_jobs(page, keyword)
 
         await scroll_page(page)
 
         jobs = await extract_jobs(page)
 
-        jobs = deduplicate_jobs(jobs)
+        print("[+] Jobs scraped:", len(jobs))
 
-        print("\n[+] Jobs found:", len(jobs))
-
-        json_file, csv_file = save_files(
-            jobs,
-            keyword
-        )
-
-        print("\n[+] JSON →", json_file)
-        print("[+] CSV  →", csv_file)
-
-        print(
-            f"\n── {len(jobs)} jobs scraped ──"
-        )
-
-        for job in jobs[:10]:
-
-            print(
-                " •",
-                job["title"],
-                job["location"],
-                job["email"]
-            )
+        append_to_csv(jobs)
 
         await browser.close()
 
-
-# ==============================
-# ENTRY POINT
-# ==============================
 
 def main():
 
@@ -386,8 +302,7 @@ def main():
 
     parser.add_argument(
         "--keyword",
-        default=DEFAULT_KEYWORD,
-        help="Search keyword"
+        default="sap sac"
     )
 
     args = parser.parse_args()
