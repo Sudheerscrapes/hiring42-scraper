@@ -18,7 +18,6 @@ async def close_popup(page):
     try:
         await page.wait_for_timeout(3000)
 
-        # Try multiple close buttons
         buttons = [
             "button[aria-label='Close']",
             "text=Maybe Later",
@@ -35,60 +34,6 @@ async def close_popup(page):
 
     except:
         pass
-
-
-async def open_site(page):
-
-    print("[+] Opening Hiring42")
-
-    await page.goto(
-        "https://www.hiring42.com/",
-        timeout=60000
-    )
-
-    await page.wait_for_timeout(5000)
-
-    await close_popup(page)
-
-    try:
-        print("[+] Clicking All Jobs")
-
-        await page.click("text=All Jobs")
-
-        await page.wait_for_timeout(4000)
-
-    except:
-        pass
-
-
-async def search_jobs(page, keyword):
-
-    print("[+] Searching:", keyword)
-
-    # WAIT for search box safely
-    await page.wait_for_selector(
-        "input, textarea",
-        timeout=60000
-    )
-
-    search_box = page.locator(
-        "input, textarea"
-    ).first
-
-    await search_box.fill(keyword)
-
-    await page.wait_for_timeout(1000)
-
-    await page.click(
-        "button:has-text('Search')"
-    )
-
-    print("[+] Waiting for results")
-
-    await page.wait_for_selector(
-        "div.rounded-2xl.border",
-        timeout=60000
-    )
 
 
 async def scroll_page(page):
@@ -247,16 +192,80 @@ async def scrape(keyword):
 
             args=[
                 "--no-sandbox",
-                "--disable-dev-shm-usage"
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled"
             ]
 
         )
 
-        page = await browser.new_page()
+        context = await browser.new_context(
 
-        await open_site(page)
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
 
-        await search_jobs(page, keyword)
+            viewport={
+                "width": 1366,
+                "height": 768
+            },
+
+            locale="en-US",
+
+            timezone_id="America/New_York"
+        )
+
+        page = await context.new_page()
+
+        page.set_default_timeout(60000)
+        page.set_default_navigation_timeout(60000)
+
+        print("[+] Opening Hiring42")
+
+        await page.goto(
+            "https://www.hiring42.com/",
+            wait_until="domcontentloaded"
+        )
+
+        # wait for Cloudflare
+        await page.wait_for_timeout(8000)
+
+        await close_popup(page)
+
+        print("[+] Clicking All Jobs")
+
+        try:
+            await page.click("text=All Jobs")
+            await page.wait_for_timeout(5000)
+        except:
+            pass
+
+        print("[+] Searching:", keyword)
+
+        await page.wait_for_selector(
+            "input[type='text'], textarea",
+            timeout=60000
+        )
+
+        search_box = page.locator(
+            "input[type='text'], textarea"
+        ).first
+
+        await search_box.fill(keyword)
+
+        await page.wait_for_timeout(1000)
+
+        await page.click(
+            "button:has-text('Search')"
+        )
+
+        print("[+] Waiting for results")
+
+        await page.wait_for_selector(
+            "div.rounded-2xl.border",
+            timeout=60000
+        )
 
         await scroll_page(page)
 
