@@ -3,6 +3,7 @@ import argparse
 import csv
 import os
 import re
+from datetime import datetime
 from playwright.async_api import async_playwright
 
 CSV_FILE = "hiring42_jobs.csv"
@@ -15,7 +16,9 @@ def clean(text):
 
 
 async def close_popup(page):
+
     try:
+
         await page.wait_for_timeout(3000)
 
         buttons = [
@@ -26,13 +29,19 @@ async def close_popup(page):
         ]
 
         for b in buttons:
+
             if await page.locator(b).count():
+
                 await page.click(b)
+
                 print("[+] Popup closed")
+
                 await page.wait_for_timeout(2000)
+
                 break
 
     except:
+
         pass
 
 
@@ -62,7 +71,9 @@ async def scroll_page(page):
         )
 
         if before == after:
+
             print("[+] End of page")
+
             break
 
 
@@ -80,6 +91,10 @@ async def extract_jobs(page):
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
     )
 
+    date_pattern = re.compile(
+        r"Posted:\s*(.*)"
+    )
+
     for card in cards:
 
         try:
@@ -89,6 +104,7 @@ async def extract_jobs(page):
             email_match = email_pattern.search(text)
 
             if not email_match:
+
                 continue
 
             email = email_match.group(0)
@@ -102,17 +118,59 @@ async def extract_jobs(page):
             title = lines[0] if lines else ""
 
             location = ""
+            work_type = ""
+            work_mode = ""
+            experience = ""
+            client = ""
+            posted_date = ""
 
             for line in lines:
-                if "," in line:
+
+                if "," in line and not location:
                     location = line
-                    break
+
+                if "C2C" in line or "W2" in line:
+                    work_type = line
+
+                if (
+                    "REMOTE" in line
+                    or "ONSITE" in line
+                    or "HYBRID" in line
+                ):
+                    work_mode = line
+
+                if (
+                    "YR" in line
+                    or "EXP" in line
+                    or "YEARS" in line
+                ):
+                    experience = line
+
+                if "Client" in line:
+                    client = line
+
+            date_match = date_pattern.search(text)
+
+            if date_match:
+
+                posted_date = date_match.group(1)
+
+            description = text
 
             jobs.append({
 
                 "title": title,
                 "location": location,
-                "email": email
+                "email": email,
+                "work_type": work_type,
+                "work_mode": work_mode,
+                "experience": experience,
+                "client": client,
+                "posted_date": posted_date,
+                "description": description,
+                "scraped_at": datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
 
             })
 
@@ -129,7 +187,14 @@ def append_to_csv(jobs):
 
         "title",
         "location",
-        "email"
+        "email",
+        "work_type",
+        "work_mode",
+        "experience",
+        "client",
+        "posted_date",
+        "description",
+        "scraped_at"
 
     ]
 
@@ -165,7 +230,7 @@ def append_to_csv(jobs):
             fieldnames=fields
         )
 
-        if os.stat(CSV_FILE).st_size == 0:
+        if not os.path.exists(CSV_FILE) or os.stat(CSV_FILE).st_size == 0:
 
             writer.writeheader()
 
@@ -219,6 +284,7 @@ async def scrape(keyword):
         page = await context.new_page()
 
         page.set_default_timeout(60000)
+
         page.set_default_navigation_timeout(60000)
 
         print("[+] Opening Hiring42")
@@ -228,7 +294,6 @@ async def scrape(keyword):
             wait_until="domcontentloaded"
         )
 
-        # wait for Cloudflare
         await page.wait_for_timeout(8000)
 
         await close_popup(page)
@@ -236,9 +301,13 @@ async def scrape(keyword):
         print("[+] Clicking All Jobs")
 
         try:
+
             await page.click("text=All Jobs")
+
             await page.wait_for_timeout(5000)
+
         except:
+
             pass
 
         print("[+] Searching:", keyword)
@@ -299,4 +368,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
