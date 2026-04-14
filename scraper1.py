@@ -36,19 +36,164 @@ async def close_popup(page):
 
     try:
 
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(3000)
 
-        if await page.locator(
-            "button[aria-label='Close']"
-        ).count():
+        for selector in [
+            "button[aria-label='Close']",
+            "button[aria-label='close']",
+            "button.close",
+            "[class*='modal'] button",
+            "[class*='popup'] button",
+        ]:
 
-            await page.click(
-                "button[aria-label='Close']"
-            )
+            try:
+
+                loc = page.locator(selector)
+
+                if await loc.count():
+
+                    await loc.first.click()
+
+                    print("Popup closed via:", selector)
+
+                    await page.wait_for_timeout(1000)
+
+                    break
+
+            except:
+
+                pass
 
     except:
 
         pass
+
+
+# ==============================
+# CLICK ALL JOBS (BEST EFFORT)
+# ==============================
+
+async def click_all_jobs(page):
+
+    selectors = [
+        "text=All Jobs",
+        "a:has-text('All Jobs')",
+        "button:has-text('All Jobs')",
+        "[href*='all']",
+        "nav a",
+    ]
+
+    for selector in selectors:
+
+        try:
+
+            loc = page.locator(selector)
+
+            if await loc.count():
+
+                await loc.first.click()
+
+                await page.wait_for_timeout(2000)
+
+                print("All Jobs clicked via:", selector)
+
+                return True
+
+        except:
+
+            pass
+
+    print("All Jobs button not found — skipping")
+
+    return False
+
+
+# ==============================
+# FIND SEARCH BOX
+# ==============================
+
+async def find_and_fill_search(page, keyword):
+
+    selectors = [
+        "textarea",
+        "input[type='search']",
+        "input[placeholder*='search' i]",
+        "input[placeholder*='keyword' i]",
+        "input[name*='search' i]",
+        "input[name*='keyword' i]",
+        "input[type='text']",
+    ]
+
+    for selector in selectors:
+
+        try:
+
+            loc = page.locator(selector).first
+
+            await loc.wait_for(timeout=10000)
+
+            await loc.fill(keyword)
+
+            print("Search box found via:", selector)
+
+            return True
+
+        except:
+
+            pass
+
+    print("ERROR: No search box found with any selector")
+
+    return False
+
+
+# ==============================
+# FIND AND CLICK SEARCH BUTTON
+# ==============================
+
+async def click_search_button(page):
+
+    selectors = [
+        "button:has-text('Search')",
+        "input[type='submit']",
+        "button[type='submit']",
+        "[class*='search'] button",
+        "button:has-text('Find')",
+    ]
+
+    for selector in selectors:
+
+        try:
+
+            loc = page.locator(selector).first
+
+            if await loc.count():
+
+                await loc.click()
+
+                print("Search button clicked via:", selector)
+
+                return True
+
+        except:
+
+            pass
+
+    # Fallback: press Enter on the search box
+
+    try:
+
+        await page.keyboard.press("Enter")
+
+        print("Search triggered via Enter key")
+
+        return True
+
+    except:
+
+        pass
+
+    return False
 
 
 # ==============================
@@ -70,50 +215,21 @@ async def perform_search(page, keyword):
                 timeout=60000
             )
 
-            await page.wait_for_load_state(
-                "networkidle"
-            )
+            await page.wait_for_load_state("domcontentloaded")
+
+            await page.wait_for_timeout(3000)
 
             await close_popup(page)
 
-            # Click All Jobs
+            await click_all_jobs(page)
 
-            try:
+            filled = await find_and_fill_search(page, keyword)
 
-                await page.wait_for_selector(
-                    "text=All Jobs",
-                    timeout=30000
-                )
+            if not filled:
 
-                await page.click("text=All Jobs")
+                raise Exception("Could not find search box")
 
-                await page.wait_for_timeout(2000)
-
-                print("All Jobs clicked")
-
-            except:
-
-                print("All Jobs not required")
-
-            # Wait for search box
-
-            await page.wait_for_selector(
-                "textarea",
-                timeout=60000
-            )
-
-            print("Search box found")
-
-            await page.fill(
-                "textarea",
-                keyword
-            )
-
-            await page.click(
-                "button:has-text('Search')"
-            )
-
-            print("Search clicked")
+            await click_search_button(page)
 
             await page.wait_for_timeout(6000)
 
@@ -152,17 +268,21 @@ async def scroll_page(page):
 
         try:
 
-            load_more = page.locator(
-                "button:has-text('Load More')"
-            )
+            for btn_text in ["Load More", "Show More", "Next"]:
 
-            if await load_more.count():
+                load_more = page.locator(
+                    f"button:has-text('{btn_text}')"
+                )
 
-                await load_more.click()
+                if await load_more.count():
 
-                print("Load More clicked (scroll", i + 1, ")")
+                    await load_more.first.click()
 
-                await page.wait_for_timeout(3000)
+                    print(f"'{btn_text}' clicked at scroll {i + 1}")
+
+                    await page.wait_for_timeout(3000)
+
+                    break
 
         except:
 
@@ -187,7 +307,7 @@ async def extract_jobs(page, keyword):
 
     jobs = []
 
-    # Save debug HTML so you can inspect if 0 cards found
+    # Save debug HTML
 
     try:
 
@@ -195,11 +315,13 @@ async def extract_jobs(page, keyword):
 
         safe_kw = keyword.replace(" ", "_").replace('"', "")
 
-        with open(f"debug_{safe_kw}.html", "w", encoding="utf-8") as f:
+        debug_file = f"debug_{safe_kw}.html"
+
+        with open(debug_file, "w", encoding="utf-8") as f:
 
             f.write(html)
 
-        print("Debug HTML saved: debug_{}.html".format(safe_kw))
+        print("Debug HTML saved:", debug_file)
 
     except:
 
@@ -207,24 +329,45 @@ async def extract_jobs(page, keyword):
 
     # Wait for job cards
 
-    try:
+    found_cards = False
 
-        await page.wait_for_selector(
-            "div:has-text('Posted:')",
-            timeout=15000
-        )
+    for card_selector in [
+        "div:has-text('Posted:')",
+        "[class*='job']",
+        "[class*='card']",
+        "[class*='result']",
+        "article",
+        "li:has-text('Posted:')",
+    ]:
 
-    except:
+        try:
 
-        print("No job cards detected")
+            await page.wait_for_selector(
+                card_selector,
+                timeout=8000
+            )
+
+            count = await page.locator(card_selector).count()
+
+            if count > 0:
+
+                print(f"Card selector matched: '{card_selector}' ({count} items)")
+
+                found_cards = True
+
+                cards = await page.locator(card_selector).all()
+
+                break
+
+        except:
+
+            pass
+
+    if not found_cards:
+
+        print("No job cards detected with any selector")
 
         return jobs
-
-    cards = await page.locator(
-        "div:has-text('Posted:')"
-    ).all()
-
-    print("Cards found:", len(cards))
 
     email_pattern = re.compile(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
@@ -234,7 +377,7 @@ async def extract_jobs(page, keyword):
 
         try:
 
-            # FIX: split BEFORE cleaning so lines are preserved
+            # Split BEFORE cleaning to preserve line structure
 
             raw_text = await card.inner_text()
 
@@ -246,11 +389,17 @@ async def extract_jobs(page, keyword):
 
             full_text = " ".join(lines)
 
+            # Skip cards with no real content
+
+            if len(full_text) < 10:
+
+                continue
+
             # Title = first non-empty line
 
             title = lines[0] if lines else ""
 
-            # Location = first line with comma that isn't a date/posted line
+            # Location = first line with comma, no date/email
 
             location = ""
 
@@ -295,8 +444,6 @@ async def extract_jobs(page, keyword):
             if "Posted:" in full_text:
 
                 raw_posted = full_text.split("Posted:")[1]
-
-                # Strip trailing fields like Score, status etc.
 
                 for stopper in ["Score", "ACTIVE", "Apply", "View"]:
 
@@ -425,7 +572,22 @@ async def scrape(keywords):
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-            headless=HEADLESS_MODE
+            headless=HEADLESS_MODE,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ]
+        )
+
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
         )
 
         for keyword in keywords:
@@ -434,7 +596,7 @@ async def scrape(keywords):
             print("Processing:", keyword)
             print("--------------------------")
 
-            page = await browser.new_page()
+            page = await context.new_page()
 
             try:
 
@@ -460,6 +622,8 @@ async def scrape(keywords):
             finally:
 
                 await page.close()
+
+        await context.close()
 
         await browser.close()
 
