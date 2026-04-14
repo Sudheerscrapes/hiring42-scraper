@@ -1,9 +1,16 @@
 name: Hiring42 Multi-Keyword Scraper
 
 on:
+
   schedule:
-    - cron: "*/15 * * * *"   # runs every 15 minutes
-  workflow_dispatch:          # allows manual run
+
+    # Weekdays evening (6:30 PM IST → 11:59 PM IST)
+    - cron: "*/15 13-18 * * 1-5"
+
+    # Weekdays night (12:00 AM IST → 4:30 AM IST)
+    - cron: "*/15 19-23 * * 1-5"
+
+  workflow_dispatch:
 
 jobs:
 
@@ -31,13 +38,11 @@ jobs:
         run: |
           python hiring42_scraper.py
 
-      # This step helps debug and confirm files exist
       - name: List generated CSV files
         run: |
           echo "Files created:"
           ls -lh *.csv || echo "No CSV files found"
 
-      # Upload ALL keyword files
       - name: Upload CSV files
         uses: actions/upload-artifact@v4
         with:
