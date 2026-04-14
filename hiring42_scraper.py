@@ -8,7 +8,6 @@ from playwright.async_api import async_playwright
 CSV_FILE = "hiring42_jobs.csv"
 
 KEYWORDS = [
-
     "sap sac",
     "sap datasphere",
     "sap pi",
@@ -25,12 +24,10 @@ KEYWORDS = [
     "powerbi",
     "sap pp",
     "sap qm",
-    "sap PPqm",
     "sap hcm",
-    "sap ewm",
     "sap abap"
-
 ]
+
 
 def clean(text):
     if not text:
@@ -39,40 +36,29 @@ def clean(text):
 
 
 async def close_popup(page):
-
     try:
-
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2000)
 
         buttons = [
-
             "button[aria-label='Close']",
             "text=Maybe Later",
             "button:has-text('Close')",
             "button:has-text('Skip')"
-
         ]
 
         for b in buttons:
-
             if await page.locator(b).count():
-
                 await page.click(b)
-
-                print("[+] Popup closed")
-
-                await page.wait_for_timeout(2000)
-
+                print("[+] Popup closed", flush=True)
                 break
 
     except:
-
         pass
 
 
 async def scroll_page(page):
 
-    for i in range(10):
+    for i in range(6):
 
         before = await page.evaluate(
             "document.body.scrollHeight"
@@ -82,23 +68,15 @@ async def scroll_page(page):
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(1500)
 
         after = await page.evaluate(
             "document.body.scrollHeight"
         )
 
-        print(
-            f"scroll {i+1}:",
-            before,
-            "→",
-            after
-        )
+        print(f"[+] Scroll {i+1}", flush=True)
 
         if before == after:
-
-            print("[+] End of page")
-
             break
 
 
@@ -110,7 +88,7 @@ async def extract_jobs(page):
         "div.rounded-2xl.border"
     )
 
-    print("[+] Found cards:", len(cards))
+    print("[+] Found cards:", len(cards), flush=True)
 
     email_pattern = re.compile(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
@@ -158,15 +136,15 @@ async def extract_jobs(page):
 
                 if (
                     "REMOTE" in line
-                    or "ONSITE" in line
-                    or "HYBRID" in line
+                    or "ONSITE"
+                    or "HYBRID"
                 ):
                     work_mode = line
 
                 if (
                     "YR" in line
-                    or "EXP" in line
-                    or "YEARS" in line
+                    or "EXP"
+                    or "YEARS"
                 ):
                     experience = line
 
@@ -177,8 +155,6 @@ async def extract_jobs(page):
 
             if date_match:
                 posted_date = date_match.group(1)
-
-            description = text
 
             jobs.append({
 
@@ -191,7 +167,7 @@ async def extract_jobs(page):
                 "experience": experience,
                 "client": client,
                 "posted_date": posted_date,
-                "description": description,
+                "description": text,
                 "scraped_at": datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
@@ -199,8 +175,7 @@ async def extract_jobs(page):
             })
 
         except Exception as e:
-
-            print("Parse error:", e)
+            print("Parse error:", e, flush=True)
 
     return jobs
 
@@ -208,7 +183,6 @@ async def extract_jobs(page):
 def append_to_csv(jobs, keyword):
 
     fields = [
-
         "keyword",
         "title",
         "location",
@@ -220,28 +194,9 @@ def append_to_csv(jobs, keyword):
         "posted_date",
         "description",
         "scraped_at"
-
     ]
 
-    existing_keys = set()
-
-    if os.path.exists(CSV_FILE):
-
-        with open(
-            CSV_FILE,
-            newline="",
-            encoding="utf-8"
-        ) as f:
-
-            reader = csv.DictReader(f)
-
-            for row in reader:
-
-                key = row["title"] + row["email"]
-
-                existing_keys.add(key)
-
-    new_count = 0
+    file_exists = os.path.exists(CSV_FILE)
 
     with open(
         CSV_FILE,
@@ -255,49 +210,21 @@ def append_to_csv(jobs, keyword):
             fieldnames=fields
         )
 
-        if not os.path.exists(CSV_FILE) or os.stat(CSV_FILE).st_size == 0:
-
+        if not file_exists:
             writer.writeheader()
 
-        # Write blank row if no jobs found
-        if not jobs:
-
-            writer.writerow({
-
-                "keyword": keyword,
-                "title": "",
-                "location": "",
-                "email": "",
-                "work_type": "",
-                "work_mode": "",
-                "experience": "",
-                "client": "",
-                "posted_date": "",
-                "description": "",
-                "scraped_at": datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-
-            })
-
-            print("[+] No jobs found — blank row added")
-
-            return
-
         for job in jobs:
+            writer.writerow(job)
 
-            key = job["title"] + job["email"]
-
-            if key not in existing_keys:
-
-                writer.writerow(job)
-
-                new_count += 1
-
-    print("[+] New jobs appended:", new_count)
+    print(
+        f"[+] {len(jobs)} jobs saved for {keyword}",
+        flush=True
+    )
 
 
-async def scrape(keyword):
+async def scrape_all():
+
+    print("[+] Starting scraper", flush=True)
 
     async with async_playwright() as p:
 
@@ -307,8 +234,7 @@ async def scrape(keyword):
 
             args=[
                 "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
+                "--disable-dev-shm-usage"
             ]
 
         )
@@ -317,89 +243,88 @@ async def scrape(keyword):
 
         page = await context.new_page()
 
-        page.set_default_timeout(60000)
-
-        print("\n==============================")
-        print("[+] Running keyword:", keyword)
-        print("==============================")
+        page.set_default_timeout(45000)
 
         await page.goto(
             "https://www.hiring42.com/",
             wait_until="domcontentloaded"
         )
 
-        await page.wait_for_timeout(8000)
-
         await close_popup(page)
 
         try:
-
             await page.click("text=All Jobs")
-
-            await page.wait_for_timeout(5000)
-
         except:
-
             pass
 
         await page.wait_for_selector(
-            "input[type='text'], textarea",
-            timeout=60000
+            "input[type='text'], textarea"
         )
 
         search_box = page.locator(
             "input[type='text'], textarea"
         ).first
 
-        await search_box.fill(keyword)
+        for keyword in KEYWORDS:
 
-        await page.wait_for_timeout(1000)
+            print(
+                f"\n[+] Processing keyword: {keyword}",
+                flush=True
+            )
 
-        await page.click(
-            "button:has-text('Search')"
-        )
+            try:
 
-        await page.wait_for_selector(
-            "div.rounded-2xl.border",
-            timeout=60000
-        )
+                await search_box.fill("")
 
-        await scroll_page(page)
+                await search_box.fill(keyword)
 
-        jobs = await extract_jobs(page)
+                await page.click(
+                    "button:has-text('Search')"
+                )
 
-        for j in jobs:
-            j["keyword"] = keyword
+                try:
 
-        append_to_csv(jobs, keyword)
+                    await page.wait_for_selector(
+                        "div.rounded-2xl.border",
+                        timeout=30000
+                    )
+
+                except:
+                    print(
+                        "[!] No results",
+                        flush=True
+                    )
+                    append_to_csv([], keyword)
+                    continue
+
+                await scroll_page(page)
+
+                jobs = await extract_jobs(page)
+
+                for j in jobs:
+                    j["keyword"] = keyword
+
+                append_to_csv(jobs, keyword)
+
+            except Exception as e:
+
+                print(
+                    f"[!] Error with {keyword}",
+                    e,
+                    flush=True
+                )
 
         await browser.close()
 
+        print(
+            "\n[+] All keywords completed",
+            flush=True
+        )
+
 
 def main():
-
-    print("[+] Starting multi-keyword scraping")
-
-    for keyword in KEYWORDS:
-
-        try:
-
-            asyncio.run(
-                scrape(keyword)
-            )
-
-        except Exception as e:
-
-            print(
-                "[!] Error with keyword:",
-                keyword
-            )
-
-            print(e)
-
-    print("\n[+] All keywords completed")
+    asyncio.run(scrape_all())
 
 
 if __name__ == "__main__":
-
     main()
