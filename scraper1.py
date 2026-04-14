@@ -35,6 +35,7 @@ def clean(text):
 async def close_popup(page):
 
     try:
+
         await page.wait_for_timeout(2000)
 
         if await page.locator(
@@ -46,6 +47,7 @@ async def close_popup(page):
             )
 
     except:
+
         pass
 
 
@@ -69,6 +71,7 @@ async def perform_search(page, keyword):
     await close_popup(page)
 
     try:
+
         await page.wait_for_selector(
             "text=All Jobs",
             timeout=20000
@@ -77,6 +80,7 @@ async def perform_search(page, keyword):
         await page.click("text=All Jobs")
 
     except:
+
         print("All Jobs click skipped")
 
     await page.wait_for_selector(
@@ -93,8 +97,9 @@ async def perform_search(page, keyword):
         "button:has-text('Search')"
     )
 
-    # wait for results to render
-    await page.wait_for_timeout(6000)
+    await page.wait_for_timeout(
+        6000
+    )
 
 
 # ==============================
@@ -113,7 +118,9 @@ async def scroll_page(page):
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(
+            2000
+        )
 
         after = await page.evaluate(
             "document.body.scrollHeight"
@@ -124,7 +131,7 @@ async def scroll_page(page):
 
 
 # ==============================
-# EXTRACT JOBS (MIRROR)
+# EXTRACT JOBS
 # ==============================
 
 async def extract_jobs(page, keyword):
@@ -257,6 +264,7 @@ async def extract_jobs(page, keyword):
 def deduplicate_jobs(jobs):
 
     seen = set()
+
     unique = []
 
     for job in jobs:
@@ -270,6 +278,7 @@ def deduplicate_jobs(jobs):
         if key not in seen:
 
             seen.add(key)
+
             unique.append(job)
 
     return unique
@@ -308,23 +317,6 @@ def save_files(jobs, keyword):
 
     ]
 
-    if not jobs:
-
-        print("No roles found for:", keyword)
-
-        jobs = [{
-
-            "keyword": keyword,
-            "posted_date": "",
-            "title": "",
-            "location": "",
-            "email": "",
-            "tags": "",
-            "status": "",
-            "score": ""
-
-        }]
-
     with open(
         csv_file,
         "w",
@@ -339,9 +331,24 @@ def save_files(jobs, keyword):
 
         writer.writeheader()
 
-        for job in jobs:
+        # Only write rows if jobs exist
 
-            writer.writerow(job)
+        if jobs:
+
+            for job in jobs:
+
+                writer.writerow(job)
+
+        else:
+
+            print(
+                "No roles found for:",
+                keyword
+            )
+
+            print(
+                "Created header-only file"
+            )
 
     print("Saved:", csv_file)
 
@@ -417,10 +424,6 @@ async def scrape(keywords):
         await browser.close()
 
 
-# ==============================
-# ENTRY POINT
-# ==============================
-
 def main():
 
     parser = argparse.ArgumentParser()
@@ -434,7 +437,9 @@ def main():
 
     if args.keyword:
 
-        keywords = [args.keyword]
+        keywords = [
+            args.keyword
+        ]
 
     else:
 
