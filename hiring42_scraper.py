@@ -35,26 +35,6 @@ def clean(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-async def close_popup(page):
-    try:
-        await page.wait_for_timeout(3000)
-
-        buttons = [
-            "button[aria-label='Close']",
-            "text=Maybe Later",
-            "button:has-text('Close')",
-            "button:has-text('Skip')"
-        ]
-
-        for b in buttons:
-            if await page.locator(b).count():
-                await page.click(b)
-                print("[+] Popup closed", flush=True)
-                break
-    except:
-        pass
-
-
 async def scroll_page(page):
 
     print("[+] Scrolling page...", flush=True)
@@ -96,10 +76,6 @@ async def extract_jobs(page):
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
     )
 
-    date_pattern = re.compile(
-        r"Posted:\s*(.*)"
-    )
-
     for card in cards:
 
         try:
@@ -126,7 +102,6 @@ async def extract_jobs(page):
             work_mode = ""
             experience = ""
             client = ""
-            posted_date = ""
 
             for line in lines:
 
@@ -153,11 +128,6 @@ async def extract_jobs(page):
                 if "Client" in line:
                     client = line
 
-            date_match = date_pattern.search(text)
-
-            if date_match:
-                posted_date = date_match.group(1)
-
             jobs.append({
 
                 "keyword": "",
@@ -168,7 +138,7 @@ async def extract_jobs(page):
                 "work_mode": work_mode,
                 "experience": experience,
                 "client": client,
-                "posted_date": posted_date,
+                "posted_date": "",
                 "description": text,
                 "scraped_at": datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
@@ -234,10 +204,7 @@ def append_to_csv(jobs, keyword):
                 )
             })
 
-            print(
-                "[!] No jobs found — blank row added",
-                flush=True
-            )
+            print("[!] No jobs found", flush=True)
 
             return
 
@@ -250,7 +217,7 @@ def append_to_csv(jobs, keyword):
     )
 
 
-async def load_site_with_retry(page):
+async def load_site(page):
 
     print("[+] Opening website...", flush=True)
 
@@ -264,7 +231,7 @@ async def load_site_with_retry(page):
             )
 
             await page.goto(
-                "https://www.hiring42.com/",
+                "https://www.hiring42.com/all_jobs",
                 wait_until="domcontentloaded",
                 timeout=90000
             )
@@ -276,7 +243,7 @@ async def load_site_with_retry(page):
 
             return True
 
-        except Exception:
+        except:
 
             print(
                 "[!] Load failed — retrying",
@@ -309,54 +276,25 @@ async def scrape_all():
         page.set_default_timeout(90000)
         page.set_default_navigation_timeout(90000)
 
-        success = await load_site_with_retry(page)
+        success = await load_site(page)
 
         if not success:
 
-            print(
-                "[!] Could not load website",
-                flush=True
-            )
+            print("[!] Could not load website", flush=True)
 
             await browser.close()
 
             return
 
-        await close_popup(page)
-
-        await page.wait_for_timeout(3000)
-
-        try:
-
-            await page.click(
-                "text=All Jobs",
-                timeout=15000
-            )
-
-            print(
-                "[+] Clicked All Jobs",
-                flush=True
-            )
-
-        except:
-
-            print(
-                "[!] All Jobs button not found",
-                flush=True
-            )
-
-        print(
-            "[+] Waiting for search box...",
-            flush=True
-        )
+        print("[+] Waiting for search box...", flush=True)
 
         await page.wait_for_selector(
-            "input[type='text']",
+            "input[placeholder]",
             timeout=60000
         )
 
         search_box = page.locator(
-            "input[type='text']"
+            "input[placeholder]"
         ).first
 
         for keyword in KEYWORDS:
