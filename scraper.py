@@ -12,7 +12,8 @@ from playwright.async_api import async_playwright
 # ==============================
 
 DEFAULT_KEYWORDS = [
-    "sap sac"
+    "sap sac",
+     '"sap sac"'
 ]
 
 HEADLESS_MODE = True
