@@ -1,14 +1,6 @@
-name: Run Hiring42 Scraper
-
-on:
-workflow_dispatch:
-schedule:
-- cron: "*/15 * * * *"
-
 jobs:
 run:
 runs-on: ubuntu-latest
-
 
 steps:
   - uses: actions/checkout@v4
