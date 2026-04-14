@@ -1,26 +1,24 @@
-name: Run Hiring Scraper
+name: Run Scraper
 
 on:
+
   workflow_dispatch:
 
   schedule:
-    - cron: "0 */6 * * *"   # runs every 6 hours
+    - cron: "0 */6 * * *"
 
 
 jobs:
-  run-scraper:
+
+  scraper:
 
     runs-on: ubuntu-latest
 
     steps:
 
-      # Step 1 — Checkout repo
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      # Step 2 — Setup Python
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -29,33 +27,34 @@ jobs:
           python-version: "3.11"
 
 
-      # Step 3 — Install dependencies
+      # Cache Playwright browsers (THIS is the speed fix)
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}
+
 
       - name: Install dependencies
         run: |
 
           python -m pip install --upgrade pip
-
           pip install playwright
 
-
-      # Step 4 — Install Playwright browser
 
       - name: Install Playwright browsers
         run: |
 
-          playwright install --with-deps
+          playwright install chromium
 
 
-      # Step 5 — Run scraper
-
-      - name: Run scraper1
+      - name: Run scraper
         run: |
 
           python scraper1.py
 
-
-      # Step 6 — Show created files (debug)
 
       - name: Show created files
         run: |
@@ -63,8 +62,6 @@ jobs:
           echo "Files created:"
           ls -l
 
-
-      # Step 7 — Upload CSV files
 
       - name: Upload CSV files
         uses: actions/upload-artifact@v4
