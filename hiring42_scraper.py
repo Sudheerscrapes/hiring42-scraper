@@ -22,7 +22,7 @@ KEYWORDS = [
     "dot net",
     ".net",
     "sap basis",
-    "power bi"
+    "power bi",
     "powerbi"
 
 ]
