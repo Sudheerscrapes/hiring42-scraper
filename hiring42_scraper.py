@@ -21,8 +21,9 @@ KEYWORDS = [
     "sap mm",
     "dot net",
     ".net",
-    "sap basis"
-    
+    "sap basis",
+    "power bi"
+    "powerbi"
 
 ]
 
