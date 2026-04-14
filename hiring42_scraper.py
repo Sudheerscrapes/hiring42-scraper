@@ -7,7 +7,10 @@ from playwright.async_api import async_playwright
 
 CSV_FILE = "hiring42_jobs.csv"
 
-KEYWORDS = [
+HEADLESS_MODE = True
+
+BASE_KEYWORDS = [
+
     "sap sac",
     "sap datasphere",
     "sap pi",
@@ -26,124 +29,146 @@ KEYWORDS = [
     "sap qm",
     "sap hcm",
     "sap abap"
+
 ]
 
 
+def generate_keywords():
+
+    keywords = []
+
+    for k in BASE_KEYWORDS:
+
+        keywords.append(k)
+        keywords.append(f'"{k}"')
+
+    return keywords
+
+
+KEYWORDS = generate_keywords()
+
+
 def clean(text):
+
     if not text:
         return ""
+
     return re.sub(r"\s+", " ", text).strip()
 
 
-async def load_site(page):
+async def close_popup(page):
 
-    print("[+] Opening website...", flush=True)
+    try:
 
-    for attempt in range(3):
+        await page.wait_for_timeout(2000)
 
-        try:
+        if await page.locator(
+            "button[aria-label='Close']"
+        ).count():
 
-            print(f"[+] Attempt {attempt+1}", flush=True)
-
-            await page.goto(
-                "https://www.hiring42.com/all_jobs",
-                wait_until="domcontentloaded",
-                timeout=90000
+            await page.click(
+                "button[aria-label='Close']"
             )
 
-            print("[+] Website loaded", flush=True)
+            print("[+] Popup closed")
 
-            return True
+        else:
 
-        except:
+            print("[+] No popup detected")
 
-            print("[!] Load failed — retrying", flush=True)
+    except:
 
-            await page.wait_for_timeout(5000)
-
-    return False
+        pass
 
 
-async def get_search_context(page):
+async def perform_search(page, keyword):
 
-    print("[+] Detecting iframe...", flush=True)
+    print("\n==============================")
+    print("[+] Running keyword:", keyword)
+    print("==============================")
 
-    frames = page.frames
-
-    print(
-        f"[+] Frames detected: {len(frames)}",
-        flush=True
+    await page.goto(
+        "https://www.hiring42.com/",
+        timeout=60000
     )
 
-    for frame in frames:
+    await page.wait_for_timeout(4000)
 
-        try:
+    await close_popup(page)
 
-            inputs = frame.locator("input")
+    try:
 
-            count = await inputs.count()
+        await page.click("text=All Jobs")
 
-            if count > 0:
+        await page.wait_for_timeout(3000)
 
-                print(
-                    "[+] Using frame for search",
-                    flush=True
-                )
+    except:
 
-                return frame
+        print("[!] All Jobs click skipped")
 
-        except:
-
-            pass
-
-    print(
-        "[+] Using main page",
-        flush=True
+    await page.fill(
+        "textarea",
+        keyword
     )
 
-    return page
+    await page.click(
+        "button:has-text('Search')"
+    )
+
+    await page.wait_for_selector(
+        "div.rounded-2xl.border",
+        timeout=15000
+    )
 
 
-async def scroll_page(context):
+async def scroll_page(page):
 
-    for i in range(6):
+    for i in range(5):
 
-        before = await context.evaluate(
+        before = await page.evaluate(
             "document.body.scrollHeight"
         )
 
-        await context.evaluate(
+        await page.evaluate(
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await asyncio.sleep(1.5)
+        await page.wait_for_timeout(2000)
 
-        after = await context.evaluate(
+        after = await page.evaluate(
             "document.body.scrollHeight"
         )
 
-        print(f"[+] Scroll {i+1}", flush=True)
+        print(
+            f"scroll {i+1}:",
+            before,
+            "→",
+            after
+        )
 
         if before == after:
+
+            print("[+] End of page")
+
             break
 
 
-async def extract_jobs(context):
+async def extract_jobs(page):
 
     jobs = []
 
-    cards = await context.query_selector_all(
+    cards = await page.query_selector_all(
         "div.rounded-2xl.border"
     )
 
-    print(
-        "[+] Found cards:",
-        len(cards),
-        flush=True
-    )
+    print("[+] Found cards:", len(cards))
 
     email_pattern = re.compile(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+    )
+
+    date_pattern = re.compile(
+        r"Posted:\s*(.*)"
     )
 
     for card in cards:
@@ -167,31 +192,39 @@ async def extract_jobs(context):
 
             title = lines[0] if lines else ""
 
+            location = ""
+
+            for line in lines:
+
+                if "," in line:
+
+                    location = line
+                    break
+
+            posted_date = ""
+
+            date_match = date_pattern.search(text)
+
+            if date_match:
+
+                posted_date = date_match.group(1)
+
             jobs.append({
 
                 "keyword": "",
                 "title": title,
-                "location": "",
+                "location": location,
                 "email": email,
-                "work_type": "",
-                "work_mode": "",
-                "experience": "",
-                "client": "",
-                "posted_date": "",
-                "description": text,
+                "posted_date": posted_date,
                 "scraped_at": datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
 
             })
 
-        except Exception as e:
+        except:
 
-            print(
-                "Parse error:",
-                e,
-                flush=True
-            )
+            pass
 
     return jobs
 
@@ -199,20 +232,33 @@ async def extract_jobs(context):
 def append_to_csv(jobs, keyword):
 
     fields = [
+
         "keyword",
         "title",
         "location",
         "email",
-        "work_type",
-        "work_mode",
-        "experience",
-        "client",
         "posted_date",
-        "description",
         "scraped_at"
+
     ]
 
-    file_exists = os.path.exists(CSV_FILE)
+    existing_keys = set()
+
+    if os.path.exists(CSV_FILE):
+
+        with open(
+            CSV_FILE,
+            newline="",
+            encoding="utf-8"
+        ) as f:
+
+            reader = csv.DictReader(f)
+
+            for row in reader:
+
+                key = row["title"] + row["email"]
+
+                existing_keys.add(key)
 
     with open(
         CSV_FILE,
@@ -226,146 +272,89 @@ def append_to_csv(jobs, keyword):
             fieldnames=fields
         )
 
-        if not file_exists:
+        if not os.path.exists(CSV_FILE):
+
             writer.writeheader()
 
         if not jobs:
 
             writer.writerow({
+
                 "keyword": keyword,
                 "title": "",
                 "location": "",
                 "email": "",
-                "work_type": "",
-                "work_mode": "",
-                "experience": "",
-                "client": "",
                 "posted_date": "",
-                "description": "",
                 "scraped_at": datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
+
             })
 
-            print(
-                "[!] No jobs found",
-                flush=True
-            )
+            print("[+] No jobs — blank row added")
 
             return
 
         for job in jobs:
 
-            writer.writerow(job)
+            key = job["title"] + job["email"]
 
-    print(
-        f"[+] {len(jobs)} jobs saved for {keyword}",
-        flush=True
-    )
+            if key not in existing_keys:
+
+                writer.writerow(job)
 
 
-async def scrape_all():
-
-    print("[+] Starting scraper", flush=True)
+async def scrape(keyword):
 
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-            headless=True,
+            headless=HEADLESS_MODE,
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage"
             ]
         )
 
-        context = await browser.new_context()
+        page = await browser.new_page()
 
-        page = await context.new_page()
+        await perform_search(page, keyword)
 
-        page.set_default_timeout(90000)
+        await scroll_page(page)
 
-        success = await load_site(page)
+        jobs = await extract_jobs(page)
 
-        if not success:
+        for j in jobs:
 
-            print(
-                "[!] Could not load website",
-                flush=True
-            )
+            j["keyword"] = keyword
 
-            await browser.close()
-
-            return
-
-        search_context = await get_search_context(page)
-
-        inputs = search_context.locator("input")
-
-        await inputs.first.wait_for()
-
-        search_box = inputs.first
-
-        print(
-            "[+] Search box ready",
-            flush=True
-        )
-
-        for keyword in KEYWORDS:
-
-            print(
-                f"\n[+] Processing keyword: {keyword}",
-                flush=True
-            )
-
-            try:
-
-                await search_box.fill("")
-
-                await search_box.fill(keyword)
-
-                await search_context.click(
-                    "button:has-text('Search')"
-                )
-
-                await search_context.wait_for_selector(
-                    "div.rounded-2xl.border",
-                    timeout=30000
-                )
-
-                await scroll_page(search_context)
-
-                jobs = await extract_jobs(
-                    search_context
-                )
-
-                for j in jobs:
-                    j["keyword"] = keyword
-
-                append_to_csv(
-                    jobs,
-                    keyword
-                )
-
-            except Exception as e:
-
-                print(
-                    f"[!] Error with {keyword}",
-                    flush=True
-                )
-
-                print(e, flush=True)
+        append_to_csv(jobs, keyword)
 
         await browser.close()
-
-        print(
-            "\n[+] All keywords completed",
-            flush=True
-        )
 
 
 def main():
 
-    asyncio.run(scrape_all())
+    print("[+] Starting scraper")
+
+    for keyword in KEYWORDS:
+
+        try:
+
+            asyncio.run(
+                scrape(keyword)
+            )
+
+        except Exception as e:
+
+            print(
+                "[!] Error with keyword:",
+                keyword
+            )
+
+            print(e)
+
+    print("\n[+] All keywords completed")
 
 
 if __name__ == "__main__":
