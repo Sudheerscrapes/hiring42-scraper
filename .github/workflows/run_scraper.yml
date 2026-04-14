@@ -1,0 +1,36 @@
+name: Run Hiring42 Scraper Every 15 Minutes
+
+on:
+schedule:
+- cron: "*/15 * * * *"
+workflow_dispatch:
+
+jobs:
+run-scraper:
+runs-on: ubuntu-latest
+
+```
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+
+  - name: Install dependencies
+    run: |
+      pip install -r requirements.txt
+      python -m playwright install chromium
+
+  - name: Run scraper
+    run: |
+      python hiring42_scraper1.py
+
+  - name: Upload CSV files
+    uses: actions/upload-artifact@v4
+    with:
+      name: scraper-results
+      path: "*.csv"
+```
