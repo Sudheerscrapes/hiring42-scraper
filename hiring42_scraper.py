@@ -37,7 +37,7 @@ def clean(text):
 
 async def close_popup(page):
     try:
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(3000)
 
         buttons = [
             "button[aria-label='Close']",
@@ -50,13 +50,15 @@ async def close_popup(page):
             if await page.locator(b).count():
                 await page.click(b)
                 print("[+] Popup closed", flush=True)
+                await page.wait_for_timeout(2000)
                 break
-
     except:
         pass
 
 
 async def scroll_page(page):
+
+    print("[+] Scrolling page...", flush=True)
 
     for i in range(6):
 
@@ -77,6 +79,7 @@ async def scroll_page(page):
         print(f"[+] Scroll {i+1}", flush=True)
 
         if before == after:
+            print("[+] End of page", flush=True)
             break
 
 
@@ -136,15 +139,15 @@ async def extract_jobs(page):
 
                 if (
                     "REMOTE" in line
-                    or "ONSITE"
-                    or "HYBRID"
+                    or "ONSITE" in line
+                    or "HYBRID" in line
                 ):
                     work_mode = line
 
                 if (
                     "YR" in line
-                    or "EXP"
-                    or "YEARS"
+                    or "EXP" in line
+                    or "YEARS" in line
                 ):
                     experience = line
 
@@ -175,6 +178,7 @@ async def extract_jobs(page):
             })
 
         except Exception as e:
+
             print("Parse error:", e, flush=True)
 
     return jobs
@@ -213,6 +217,31 @@ def append_to_csv(jobs, keyword):
         if not file_exists:
             writer.writeheader()
 
+        if not jobs:
+
+            writer.writerow({
+                "keyword": keyword,
+                "title": "",
+                "location": "",
+                "email": "",
+                "work_type": "",
+                "work_mode": "",
+                "experience": "",
+                "client": "",
+                "posted_date": "",
+                "description": "",
+                "scraped_at": datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            })
+
+            print(
+                "[!] No jobs found — blank row added",
+                flush=True
+            )
+
+            return
+
         for job in jobs:
             writer.writerow(job)
 
@@ -229,40 +258,73 @@ async def scrape_all():
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-
             headless=True,
-
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage"
             ]
-
         )
 
         context = await browser.new_context()
 
         page = await context.new_page()
 
-        page.set_default_timeout(45000)
+        page.set_default_timeout(60000)
+
+        print("[+] Opening website...", flush=True)
 
         await page.goto(
             "https://www.hiring42.com/",
-            wait_until="domcontentloaded"
+            wait_until="networkidle"
         )
+
+        print("[+] Page loaded", flush=True)
 
         await close_popup(page)
 
-        try:
-            await page.click("text=All Jobs")
-        except:
-            pass
+        await page.wait_for_timeout(3000)
 
-        await page.wait_for_selector(
-            "input[type='text'], textarea"
+        try:
+            await page.click(
+                "text=All Jobs",
+                timeout=15000
+            )
+            print("[+] Clicked All Jobs", flush=True)
+
+        except:
+            print(
+                "[!] All Jobs button not found",
+                flush=True
+            )
+
+        print(
+            "[+] Waiting for search box...",
+            flush=True
         )
 
+        try:
+
+            await page.wait_for_selector(
+                "input[placeholder*='Search'], input[type='text']",
+                timeout=60000
+            )
+
+        except:
+
+            print(
+                "[!] Search box not found — reloading page",
+                flush=True
+            )
+
+            await page.reload()
+
+            await page.wait_for_selector(
+                "input[placeholder*='Search'], input[type='text']",
+                timeout=60000
+            )
+
         search_box = page.locator(
-            "input[type='text'], textarea"
+            "input[placeholder*='Search'], input[type='text']"
         ).first
 
         for keyword in KEYWORDS:
@@ -290,11 +352,17 @@ async def scrape_all():
                     )
 
                 except:
+
                     print(
-                        "[!] No results",
+                        "[!] No results found",
                         flush=True
                     )
-                    append_to_csv([], keyword)
+
+                    append_to_csv(
+                        [],
+                        keyword
+                    )
+
                     continue
 
                 await scroll_page(page)
@@ -304,15 +372,19 @@ async def scrape_all():
                 for j in jobs:
                     j["keyword"] = keyword
 
-                append_to_csv(jobs, keyword)
+                append_to_csv(
+                    jobs,
+                    keyword
+                )
 
             except Exception as e:
 
                 print(
-                    f"[!] Error with {keyword}",
-                    e,
+                    f"[!] Error with keyword {keyword}",
                     flush=True
                 )
+
+                print(e, flush=True)
 
         await browser.close()
 
