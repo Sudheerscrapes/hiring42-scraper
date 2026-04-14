@@ -12,11 +12,17 @@ from playwright.async_api import async_playwright
 # ==============================
 
 DEFAULT_KEYWORDS = [
-    "sap sac",
-    '"sap sac"'
+    "sap sac"
 ]
 
 HEADLESS_MODE = True
+
+SKIP_TITLES = [
+    "search",
+    "submit your candidates",
+    "find similar jobs",
+    "submit your candidates find similar jobs",
+]
 
 
 # ==============================
@@ -66,12 +72,9 @@ async def perform_search(page, keyword):
         timeout=60000
     )
 
-    # Wait for page to fully settle
     await page.wait_for_timeout(5000)
-
     await close_popup(page)
 
-    # Try clicking "All Jobs" tab
     try:
         await page.click("text=All Jobs", timeout=5000)
         await page.wait_for_timeout(3000)
@@ -80,8 +83,7 @@ async def perform_search(page, keyword):
 
     await close_popup(page)
 
-    # ── Find the search textarea ──────────────────────────────────
-    # Try multiple selectors in order of specificity
+    # ── Find search input ─────────────────────────────────────────
     textarea_selectors = [
         "textarea[placeholder]",
         "textarea",
@@ -92,7 +94,6 @@ async def perform_search(page, keyword):
     ]
 
     textarea = None
-
     for sel in textarea_selectors:
         try:
             await page.wait_for_selector(sel, timeout=8000)
@@ -103,7 +104,6 @@ async def perform_search(page, keyword):
             continue
 
     if not textarea:
-        # Debug: dump visible input elements
         inputs = await page.evaluate("""
             () => Array.from(document.querySelectorAll('input,textarea'))
                        .map(el => ({
@@ -118,13 +118,12 @@ async def perform_search(page, keyword):
         print("  Available inputs on page:", json.dumps(inputs, indent=2))
         raise Exception("No search input found on page")
 
-    # Clear and fill
     await page.click(textarea)
     await page.fill(textarea, "")
     await page.type(textarea, keyword, delay=50)
     await page.wait_for_timeout(500)
 
-    # ── Click Search button ───────────────────────────────────────
+    # ── Click Search ──────────────────────────────────────────────
     search_btn_selectors = [
         "button:has-text('Search')",
         "button[type='submit']",
@@ -143,19 +142,11 @@ async def perform_search(page, keyword):
             continue
 
     if not clicked:
-        # Fallback: press Enter
         await page.press(textarea, "Enter")
         print("  Pressed Enter to search")
 
     # ── Wait for results ──────────────────────────────────────────
-    result_selectors = [
-        "div.rounded-2xl.border",
-        "[class*='job-card']",
-        "[class*='card']",
-        "article",
-    ]
-
-    for res_sel in result_selectors:
+    for res_sel in ["div.rounded-2xl.border", "[class*='job-card']", "[class*='card']", "article"]:
         try:
             await page.wait_for_selector(res_sel, timeout=15000)
             print(f"  Results loaded via: {res_sel}")
@@ -189,7 +180,6 @@ async def extract_jobs(page, keyword):
     cards = await page.query_selector_all("div.rounded-2xl.border")
 
     if not cards:
-        # Fallback selectors
         cards = await page.query_selector_all("[class*='job-card'], article")
 
     email_pattern = re.compile(
@@ -198,19 +188,36 @@ async def extract_jobs(page, keyword):
 
     for card in cards:
         try:
-            full_text = clean(await card.inner_text())
-            lines = full_text.split("\n")
-            title = lines[0] if lines else ""
 
+            # ── Split on raw newlines BEFORE cleaning ──────────────
+            raw_text = await card.inner_text()
+            lines = [clean(l) for l in raw_text.split("\n") if clean(l)]
+
+            if not lines:
+                continue
+
+            # ── Title = first non-empty line only ──────────────────
+            title = lines[0]
+
+            # ── Skip UI noise cards ────────────────────────────────
+            if title.lower() in SKIP_TITLES or not title:
+                continue
+
+            # ── Full text for other field extraction ───────────────
+            full_text = " ".join(lines)
+
+            # ── Location ───────────────────────────────────────────
             location = ""
-            for line in lines:
-                if "," in line and not line.startswith("Posted"):
+            for line in lines[1:]:
+                if "," in line and not line.lower().startswith("posted"):
                     location = line
                     break
 
+            # ── Email ──────────────────────────────────────────────
             email_match = email_pattern.search(full_text)
             email = email_match.group(0) if email_match else ""
 
+            # ── Tags ───────────────────────────────────────────────
             tags = []
             badge_elements = await card.query_selector_all("span")
             for badge in badge_elements:
@@ -219,27 +226,30 @@ async def extract_jobs(page, keyword):
                     tags.append(text)
             tags_text = " | ".join(tags)
 
+            # ── Posted date ────────────────────────────────────────
             posted_date = ""
             if "Posted:" in full_text:
                 posted_date = (
                     full_text.split("Posted:")[1].split("Score")[0].strip()
                 )
 
+            # ── Score ──────────────────────────────────────────────
             score = ""
             if "Score:" in full_text:
                 score = full_text.split("Score:")[1].strip()
 
+            # ── Status ─────────────────────────────────────────────
             status = "ACTIVE" if "ACTIVE" in full_text else ""
 
             jobs.append({
-                "keyword": keyword,
+                "keyword":     keyword,
                 "posted_date": posted_date,
-                "title": title,
-                "location": location,
-                "email": email,
-                "tags": tags_text,
-                "status": status,
-                "score": score,
+                "title":       title,
+                "location":    location,
+                "email":       email,
+                "tags":        tags_text,
+                "status":      status,
+                "score":       score,
             })
 
         except Exception as e:
@@ -314,7 +324,6 @@ async def scrape(keywords):
             locale="en-US",
         )
 
-        # Hide webdriver flag
         await context.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
@@ -339,7 +348,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--keyword", help="Run single keyword")
     args = parser.parse_args()
-
     keywords = [args.keyword] if args.keyword else DEFAULT_KEYWORDS
     asyncio.run(scrape(keywords))
 
