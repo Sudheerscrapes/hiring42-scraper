@@ -1,33 +1,23 @@
 import asyncio
+import argparse
+import json
 import csv
-import os
 import re
 from datetime import datetime
 from playwright.async_api import async_playwright
 
-CSV_FILE = "hiring42_jobs.csv"
 
-KEYWORDS = [
-    "sap sac",
-    "sap datasphere",
-    "sap pi",
-    "sap po",
-    "sap cpi",
-    "sap btp",
-    "sap sd",
-    "sap ewm",
-    "sap mm",
-    "dot net",
-    ".net",
-    "sap basis",
-    "power bi",
-    "powerbi",
-    "sap pp",
-    "sap qm",
-    "sap hcm",
-    "sap abap"
-]
+# ==============================
+# DEFAULT SETTINGS
+# ==============================
 
+DEFAULT_KEYWORD = "sap sac"
+HEADLESS_MODE = False
+
+
+# ==============================
+# CLEAN TEXT
+# ==============================
 
 def clean(text):
     if not text:
@@ -35,11 +25,92 @@ def clean(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
+# ==============================
+# CLOSE POPUP
+# ==============================
+
+async def close_popup(page):
+
+    try:
+
+        await page.wait_for_timeout(2000)
+
+        if await page.locator(
+            "button[aria-label='Close']"
+        ).count():
+
+            await page.click(
+                "button[aria-label='Close']"
+            )
+
+            print("[+] Popup closed")
+
+        else:
+
+            print("[+] No popup detected")
+
+    except:
+
+        print("[+] Popup handling skipped")
+
+
+# ==============================
+# SEARCH
+# ==============================
+
+async def perform_search(page, keyword):
+
+    print("[+] Opening Hiring42")
+
+    await page.goto(
+        "https://www.hiring42.com/",
+        timeout=60000
+    )
+
+    await page.wait_for_timeout(4000)
+
+    await close_popup(page)
+
+    print("[+] Clicking All Jobs")
+
+    try:
+
+        await page.click("text=All Jobs")
+
+        await page.wait_for_timeout(3000)
+
+    except:
+
+        print("[!] All Jobs click skipped")
+
+    print("[+] Typing keyword:", keyword)
+
+    await page.fill(
+        "textarea",
+        keyword
+    )
+
+    print("[+] Clicking Search")
+
+    await page.click(
+        "button:has-text('Search')"
+    )
+
+    print("[+] Waiting for results")
+
+    await page.wait_for_selector(
+        "div.rounded-2xl.border",
+        timeout=15000
+    )
+
+
+# ==============================
+# SCROLL
+# ==============================
+
 async def scroll_page(page):
 
-    print("[+] Scrolling page...", flush=True)
-
-    for i in range(6):
+    for i in range(5):
 
         before = await page.evaluate(
             "document.body.scrollHeight"
@@ -49,18 +120,29 @@ async def scroll_page(page):
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await page.wait_for_timeout(1500)
+        await page.wait_for_timeout(2000)
 
         after = await page.evaluate(
             "document.body.scrollHeight"
         )
 
-        print(f"[+] Scroll {i+1}", flush=True)
+        print(
+            f"scroll {i+1}:",
+            before,
+            "→",
+            after
+        )
 
         if before == after:
-            print("[+] End of page", flush=True)
+
+            print("[+] End of page")
+
             break
 
+
+# ==============================
+# EXTRACT JOBS
+# ==============================
 
 async def extract_jobs(page):
 
@@ -70,10 +152,18 @@ async def extract_jobs(page):
         "div.rounded-2xl.border"
     )
 
-    print("[+] Found cards:", len(cards), flush=True)
+    print("[+] Found cards:", len(cards))
 
     email_pattern = re.compile(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+    )
+
+    date_pattern = re.compile(
+        r"Posted:\s*(.*)"
+    )
+
+    score_pattern = re.compile(
+        r"Score:\s*([0-9.]+%)"
     )
 
     for card in cards:
@@ -98,82 +188,128 @@ async def extract_jobs(page):
             title = lines[0] if lines else ""
 
             location = ""
-            work_type = ""
-            work_mode = ""
-            experience = ""
-            client = ""
 
             for line in lines:
 
-                if "," in line and not location:
+                if "," in line:
+
                     location = line
+                    break
 
-                if "C2C" in line or "W2" in line:
-                    work_type = line
+            posted_date = ""
 
-                if (
-                    "REMOTE" in line
-                    or "ONSITE" in line
-                    or "HYBRID" in line
-                ):
+            date_match = date_pattern.search(text)
+
+            if date_match:
+
+                posted_date = date_match.group(1)
+
+            score = ""
+
+            score_match = score_pattern.search(text)
+
+            if score_match:
+
+                score = score_match.group(1)
+
+            work_type = ""
+            work_mode = ""
+            experience = ""
+
+            for line in lines:
+
+                if "C2C" in line:
+
+                    work_type = "C2C"
+
+                if "REMOTE" in line or "ONSITE" in line:
+
                     work_mode = line
 
-                if (
-                    "YR" in line
-                    or "EXP"
-                    or "YEARS"
-                ):
-                    experience = line
+                if "YR" in line or "EXP" in line:
 
-                if "Client" in line:
-                    client = line
+                    experience = line
 
             jobs.append({
 
-                "keyword": "",
                 "title": title,
                 "location": location,
                 "email": email,
                 "work_type": work_type,
                 "work_mode": work_mode,
                 "experience": experience,
-                "client": client,
-                "posted_date": "",
-                "description": text,
-                "scraped_at": datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                "posted_date": posted_date,
+                "score": score,
+                "full_text": text
 
             })
 
         except Exception as e:
 
-            print("Parse error:", e, flush=True)
+            print("Parse error:", e)
 
     return jobs
 
 
-def append_to_csv(jobs, keyword):
+# ==============================
+# DEDUPLICATE
+# ==============================
+
+def deduplicate_jobs(jobs):
+
+    seen = set()
+    unique = []
+
+    for job in jobs:
+
+        key = job["title"] + job["email"]
+
+        if key not in seen:
+
+            seen.add(key)
+            unique.append(job)
+
+    return unique
+
+
+# ==============================
+# SAVE FILES
+# ==============================
+
+def save_files(jobs, keyword):
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    json_file = f"hiring42_{keyword}_{timestamp}.json"
+    csv_file = f"hiring42_{keyword}_{timestamp}.csv"
 
     fields = [
-        "keyword",
+
         "title",
         "location",
         "email",
         "work_type",
         "work_mode",
         "experience",
-        "client",
         "posted_date",
-        "description",
-        "scraped_at"
+        "score",
+        "full_text"
+
     ]
 
-    file_exists = os.path.exists(CSV_FILE)
+    with open(json_file, "w", encoding="utf-8") as f:
+
+        json.dump(
+            jobs,
+            f,
+            indent=2
+        )
 
     with open(
-        CSV_FILE,
-        "a",
+        csv_file,
+        "w",
         newline="",
         encoding="utf-8"
     ) as f:
@@ -183,189 +319,86 @@ def append_to_csv(jobs, keyword):
             fieldnames=fields
         )
 
-        if not file_exists:
-            writer.writeheader()
-
-        if not jobs:
-
-            writer.writerow({
-                "keyword": keyword,
-                "title": "",
-                "location": "",
-                "email": "",
-                "work_type": "",
-                "work_mode": "",
-                "experience": "",
-                "client": "",
-                "posted_date": "",
-                "description": "",
-                "scraped_at": datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-            })
-
-            print("[!] No jobs found", flush=True)
-
-            return
+        writer.writeheader()
 
         for job in jobs:
+
             writer.writerow(job)
 
-    print(
-        f"[+] {len(jobs)} jobs saved for {keyword}",
-        flush=True
-    )
+    return json_file, csv_file
 
 
-async def load_site(page):
+# ==============================
+# MAIN SCRAPER
+# ==============================
 
-    print("[+] Opening website...", flush=True)
-
-    for attempt in range(3):
-
-        try:
-
-            print(
-                f"[+] Attempt {attempt+1}",
-                flush=True
-            )
-
-            await page.goto(
-                "https://www.hiring42.com/all_jobs",
-                wait_until="domcontentloaded",
-                timeout=90000
-            )
-
-            print(
-                "[+] Website loaded",
-                flush=True
-            )
-
-            return True
-
-        except:
-
-            print(
-                "[!] Load failed — retrying",
-                flush=True
-            )
-
-            await page.wait_for_timeout(5000)
-
-    return False
-
-
-async def scrape_all():
-
-    print("[+] Starting scraper", flush=True)
+async def scrape(keyword):
 
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
+            headless=HEADLESS_MODE
         )
 
-        context = await browser.new_context()
+        page = await browser.new_page()
 
-        page = await context.new_page()
+        await perform_search(page, keyword)
 
-        page.set_default_timeout(90000)
-        page.set_default_navigation_timeout(90000)
+        await scroll_page(page)
 
-        success = await load_site(page)
+        jobs = await extract_jobs(page)
 
-        if not success:
+        jobs = deduplicate_jobs(jobs)
 
-            print("[!] Could not load website", flush=True)
+        print("\n[+] Jobs found:", len(jobs))
 
-            await browser.close()
-
-            return
-
-        print("[+] Waiting for search box...", flush=True)
-
-        await page.wait_for_selector(
-            "input[placeholder]",
-            timeout=60000
+        json_file, csv_file = save_files(
+            jobs,
+            keyword
         )
 
-        search_box = page.locator(
-            "input[placeholder]"
-        ).first
+        print("\n[+] JSON →", json_file)
+        print("[+] CSV  →", csv_file)
 
-        for keyword in KEYWORDS:
+        print(
+            f"\n── {len(jobs)} jobs scraped ──"
+        )
+
+        for job in jobs[:10]:
 
             print(
-                f"\n[+] Processing keyword: {keyword}",
-                flush=True
+                " •",
+                job["title"],
+                job["location"],
+                job["email"]
             )
-
-            try:
-
-                await search_box.fill("")
-
-                await search_box.fill(keyword)
-
-                await page.click(
-                    "button:has-text('Search')"
-                )
-
-                try:
-
-                    await page.wait_for_selector(
-                        "div.rounded-2xl.border",
-                        timeout=30000
-                    )
-
-                except:
-
-                    print(
-                        "[!] No results",
-                        flush=True
-                    )
-
-                    append_to_csv(
-                        [],
-                        keyword
-                    )
-
-                    continue
-
-                await scroll_page(page)
-
-                jobs = await extract_jobs(page)
-
-                for j in jobs:
-                    j["keyword"] = keyword
-
-                append_to_csv(
-                    jobs,
-                    keyword
-                )
-
-            except Exception as e:
-
-                print(
-                    f"[!] Error with keyword {keyword}",
-                    flush=True
-                )
-
-                print(e, flush=True)
 
         await browser.close()
 
-        print(
-            "\n[+] All keywords completed",
-            flush=True
-        )
 
+# ==============================
+# ENTRY POINT
+# ==============================
 
 def main():
-    asyncio.run(scrape_all())
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--keyword",
+        default=DEFAULT_KEYWORD,
+        help="Search keyword"
+    )
+
+    args = parser.parse_args()
+
+    print("[+] Using keyword:", args.keyword)
+
+    asyncio.run(
+        scrape(
+            args.keyword
+        )
+    )
 
 
 if __name__ == "__main__":
