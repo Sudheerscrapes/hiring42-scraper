@@ -4,11 +4,17 @@ on:
 
   schedule:
 
-    # Weekdays evening (6:30 PM IST → 11:59 PM IST)
-    - cron: "*/15 13-18 * * 1-5"
+    # Start exactly at 6:30 PM IST
+    - cron: "30 13 * * 1-5"
 
-    # Weekdays night (12:00 AM IST → 4:30 AM IST)
-    - cron: "*/15 19-23 * * 1-5"
+    # Continue every 15 minutes until midnight IST
+    - cron: "*/15 14-18 * * 1-5"
+
+    # After midnight until 4:30 AM IST
+    - cron: "*/15 19-22 * * 1-5"
+
+    # Last run at 4:30 AM IST
+    - cron: "0,15,30 23 * * 1-5"
 
   workflow_dispatch:
 
@@ -17,6 +23,8 @@ jobs:
   scrape-jobs:
 
     runs-on: ubuntu-latest
+
+    timeout-minutes: 30
 
     steps:
 
