@@ -12,15 +12,14 @@ from playwright.async_api import async_playwright
 
 DEFAULT_KEYWORDS = [
     "sap sac",
-    '"sap sac"',
-    "sap bw"
+    '"sap sac"'
 ]
 
 HEADLESS_MODE = True
 
 
 # ==============================
-# CLEAN
+# CLEAN TEXT
 # ==============================
 
 def clean(text):
@@ -36,7 +35,6 @@ def clean(text):
 async def close_popup(page):
 
     try:
-
         await page.wait_for_timeout(2000)
 
         if await page.locator(
@@ -48,7 +46,6 @@ async def close_popup(page):
             )
 
     except:
-
         pass
 
 
@@ -72,7 +69,6 @@ async def perform_search(page, keyword):
     await close_popup(page)
 
     try:
-
         await page.wait_for_selector(
             "text=All Jobs",
             timeout=20000
@@ -81,10 +77,7 @@ async def perform_search(page, keyword):
         await page.click("text=All Jobs")
 
     except:
-
         print("All Jobs click skipped")
-
-    # wait for search box
 
     await page.wait_for_selector(
         "textarea",
@@ -100,9 +93,8 @@ async def perform_search(page, keyword):
         "button:has-text('Search')"
     )
 
-    await page.wait_for_timeout(
-        5000
-    )
+    # wait for results to render
+    await page.wait_for_timeout(6000)
 
 
 # ==============================
@@ -121,9 +113,7 @@ async def scroll_page(page):
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await page.wait_for_timeout(
-            2000
-        )
+        await page.wait_for_timeout(2000)
 
         after = await page.evaluate(
             "document.body.scrollHeight"
@@ -134,16 +124,29 @@ async def scroll_page(page):
 
 
 # ==============================
-# EXTRACT JOBS
+# EXTRACT JOBS (MIRROR)
 # ==============================
 
 async def extract_jobs(page, keyword):
 
     jobs = []
 
-    cards = await page.query_selector_all(
-        "div.rounded-2xl.border"
-    )
+    try:
+
+        await page.wait_for_selector(
+            "div:has-text('Posted:')",
+            timeout=15000
+        )
+
+    except:
+
+        print("No job cards detected")
+
+        return jobs
+
+    cards = await page.locator(
+        "div:has-text('Posted:')"
+    ).all()
 
     print("Cards found:", len(cards))
 
@@ -167,7 +170,8 @@ async def extract_jobs(page, keyword):
 
             for line in lines:
 
-                if "," in line and not line.startswith("Posted"):
+                if "," in line and "Posted" not in line:
+
                     location = line
                     break
 
@@ -181,27 +185,23 @@ async def extract_jobs(page, keyword):
                 else ""
             )
 
-            # TAGS
-
             tags = []
 
-            badge_elements = await card.query_selector_all(
+            spans = await card.locator(
                 "span"
-            )
+            ).all()
 
-            for badge in badge_elements:
+            for s in spans:
 
-                text = clean(
-                    await badge.inner_text()
+                txt = clean(
+                    await s.inner_text()
                 )
 
-                if text and text != "ACTIVE":
+                if txt and txt != "ACTIVE":
 
-                    tags.append(text)
+                    tags.append(txt)
 
             tags_text = " | ".join(tags)
-
-            # POSTED DATE
 
             posted_date = ""
 
@@ -214,8 +214,6 @@ async def extract_jobs(page, keyword):
                     .strip()
                 )
 
-            # SCORE
-
             score = ""
 
             if "Score:" in full_text:
@@ -225,8 +223,6 @@ async def extract_jobs(page, keyword):
                     .split("Score:")[1]
                     .strip()
                 )
-
-            # STATUS
 
             status = ""
 
@@ -261,7 +257,6 @@ async def extract_jobs(page, keyword):
 def deduplicate_jobs(jobs):
 
     seen = set()
-
     unique = []
 
     for job in jobs:
@@ -275,7 +270,6 @@ def deduplicate_jobs(jobs):
         if key not in seen:
 
             seen.add(key)
-
             unique.append(job)
 
     return unique
@@ -313,8 +307,6 @@ def save_files(jobs, keyword):
         "score"
 
     ]
-
-    # if no jobs found
 
     if not jobs:
 
@@ -442,20 +434,14 @@ def main():
 
     if args.keyword:
 
-        keywords = [
-            args.keyword
-        ]
+        keywords = [args.keyword]
 
     else:
 
         keywords = DEFAULT_KEYWORDS
 
     asyncio.run(
-        scrape(
-            keywords
-        )
-
-
+        scrape(keywords)
     )
 
 
