@@ -64,59 +64,61 @@ async def load_site(page):
     return False
 
 
-async def get_search_box(page):
+async def get_search_context(page):
 
-    print("[+] Locating search box...", flush=True)
+    print("[+] Detecting iframe...", flush=True)
 
-    await page.wait_for_selector("body")
+    frames = page.frames
 
-    await page.wait_for_timeout(5000)
+    print(
+        f"[+] Frames detected: {len(frames)}",
+        flush=True
+    )
 
-    inputs = page.locator("input")
-
-    count = await inputs.count()
-
-    print(f"[+] Inputs detected: {count}", flush=True)
-
-    for i in range(count):
-
-        box = inputs.nth(i)
+    for frame in frames:
 
         try:
 
-            visible = await box.is_visible()
+            inputs = frame.locator("input")
 
-            if visible:
+            count = await inputs.count()
+
+            if count > 0:
 
                 print(
-                    f"[+] Using input index {i}",
+                    "[+] Using frame for search",
                     flush=True
                 )
 
-                return box
+                return frame
 
         except:
 
             pass
 
-    return None
+    print(
+        "[+] Using main page",
+        flush=True
+    )
+
+    return page
 
 
-async def scroll_page(page):
+async def scroll_page(context):
 
     for i in range(6):
 
-        before = await page.evaluate(
+        before = await context.evaluate(
             "document.body.scrollHeight"
         )
 
-        await page.evaluate(
+        await context.evaluate(
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await page.wait_for_timeout(1500)
+        await asyncio.sleep(1.5)
 
-        after = await page.evaluate(
+        after = await context.evaluate(
             "document.body.scrollHeight"
         )
 
@@ -126,15 +128,19 @@ async def scroll_page(page):
             break
 
 
-async def extract_jobs(page):
+async def extract_jobs(context):
 
     jobs = []
 
-    cards = await page.query_selector_all(
+    cards = await context.query_selector_all(
         "div.rounded-2xl.border"
     )
 
-    print("[+] Found cards:", len(cards), flush=True)
+    print(
+        "[+] Found cards:",
+        len(cards),
+        flush=True
+    )
 
     email_pattern = re.compile(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
@@ -181,7 +187,11 @@ async def extract_jobs(page):
 
         except Exception as e:
 
-            print("Parse error:", e, flush=True)
+            print(
+                "Parse error:",
+                e,
+                flush=True
+            )
 
     return jobs
 
@@ -219,7 +229,33 @@ def append_to_csv(jobs, keyword):
         if not file_exists:
             writer.writeheader()
 
+        if not jobs:
+
+            writer.writerow({
+                "keyword": keyword,
+                "title": "",
+                "location": "",
+                "email": "",
+                "work_type": "",
+                "work_mode": "",
+                "experience": "",
+                "client": "",
+                "posted_date": "",
+                "description": "",
+                "scraped_at": datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            })
+
+            print(
+                "[!] No jobs found",
+                flush=True
+            )
+
+            return
+
         for job in jobs:
+
             writer.writerow(job)
 
     print(
@@ -252,24 +288,27 @@ async def scrape_all():
 
         if not success:
 
-            print("[!] Could not load website", flush=True)
-
-            await browser.close()
-
-            return
-
-        search_box = await get_search_box(page)
-
-        if not search_box:
-
             print(
-                "[!] Search box not found",
+                "[!] Could not load website",
                 flush=True
             )
 
             await browser.close()
 
             return
+
+        search_context = await get_search_context(page)
+
+        inputs = search_context.locator("input")
+
+        await inputs.first.wait_for()
+
+        search_box = inputs.first
+
+        print(
+            "[+] Search box ready",
+            flush=True
+        )
 
         for keyword in KEYWORDS:
 
@@ -284,18 +323,20 @@ async def scrape_all():
 
                 await search_box.fill(keyword)
 
-                await page.click(
+                await search_context.click(
                     "button:has-text('Search')"
                 )
 
-                await page.wait_for_selector(
+                await search_context.wait_for_selector(
                     "div.rounded-2xl.border",
                     timeout=30000
                 )
 
-                await scroll_page(page)
+                await scroll_page(search_context)
 
-                jobs = await extract_jobs(page)
+                jobs = await extract_jobs(
+                    search_context
+                )
 
                 for j in jobs:
                     j["keyword"] = keyword
@@ -323,8 +364,10 @@ async def scrape_all():
 
 
 def main():
+
     asyncio.run(scrape_all())
 
 
 if __name__ == "__main__":
+
     main()
