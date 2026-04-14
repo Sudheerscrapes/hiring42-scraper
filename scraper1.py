@@ -52,54 +52,84 @@ async def close_popup(page):
 
 
 # ==============================
-# SEARCH
+# ROBUST SEARCH (WITH RETRY)
 # ==============================
 
 async def perform_search(page, keyword):
 
     print("\nSearching:", keyword)
 
-    await page.goto(
-        "https://www.hiring42.com/",
-        timeout=60000
-    )
+    for attempt in range(1, 4):
 
-    await page.wait_for_load_state(
-        "networkidle"
-    )
+        try:
 
-    await close_popup(page)
+            print("Attempt:", attempt)
 
-    try:
+            await page.goto(
+                "https://www.hiring42.com/",
+                timeout=60000
+            )
 
-        await page.wait_for_selector(
-            "text=All Jobs",
-            timeout=20000
-        )
+            await page.wait_for_load_state(
+                "networkidle"
+            )
 
-        await page.click("text=All Jobs")
+            await close_popup(page)
 
-    except:
+            # Click All Jobs
 
-        print("All Jobs click skipped")
+            try:
 
-    await page.wait_for_selector(
-        "textarea",
-        timeout=30000
-    )
+                await page.wait_for_selector(
+                    "text=All Jobs",
+                    timeout=30000
+                )
 
-    await page.fill(
-        "textarea",
-        keyword
-    )
+                await page.click("text=All Jobs")
 
-    await page.click(
-        "button:has-text('Search')"
-    )
+                print("All Jobs clicked")
 
-    await page.wait_for_timeout(
-        6000
-    )
+            except:
+
+                print("All Jobs not required")
+
+            # Wait for search box
+
+            await page.wait_for_selector(
+                "textarea",
+                timeout=60000
+            )
+
+            print("Search box found")
+
+            await page.fill(
+                "textarea",
+                keyword
+            )
+
+            await page.click(
+                "button:has-text('Search')"
+            )
+
+            print("Search clicked")
+
+            await page.wait_for_timeout(
+                6000
+            )
+
+            return
+
+        except Exception as e:
+
+            print("Retry due to:", e)
+
+            if attempt == 3:
+
+                raise
+
+            await page.wait_for_timeout(
+                5000
+            )
 
 
 # ==============================
@@ -118,9 +148,7 @@ async def scroll_page(page):
             "window.scrollTo(0, document.body.scrollHeight)"
         )
 
-        await page.wait_for_timeout(
-            2000
-        )
+        await page.wait_for_timeout(2000)
 
         after = await page.evaluate(
             "document.body.scrollHeight"
@@ -264,7 +292,6 @@ async def extract_jobs(page, keyword):
 def deduplicate_jobs(jobs):
 
     seen = set()
-
     unique = []
 
     for job in jobs:
@@ -278,14 +305,13 @@ def deduplicate_jobs(jobs):
         if key not in seen:
 
             seen.add(key)
-
             unique.append(job)
 
     return unique
 
 
 # ==============================
-# SAVE FILE
+# SAVE FILE (NO BLANK ROWS)
 # ==============================
 
 def save_files(jobs, keyword):
@@ -331,8 +357,6 @@ def save_files(jobs, keyword):
 
         writer.writeheader()
 
-        # Only write rows if jobs exist
-
         if jobs:
 
             for job in jobs:
@@ -341,20 +365,14 @@ def save_files(jobs, keyword):
 
         else:
 
-            print(
-                "No roles found for:",
-                keyword
-            )
-
-            print(
-                "Created header-only file"
-            )
+            print("No roles found for:", keyword)
+            print("Created header-only file")
 
     print("Saved:", csv_file)
 
 
 # ==============================
-# MAIN SCRAPER
+# MAIN
 # ==============================
 
 async def scrape(keywords):
@@ -375,47 +393,24 @@ async def scrape(keywords):
 
             try:
 
-                await perform_search(
-                    page,
-                    keyword
-                )
+                await perform_search(page, keyword)
 
-                await scroll_page(
-                    page
-                )
+                await scroll_page(page)
 
-                jobs = await extract_jobs(
-                    page,
-                    keyword
-                )
+                jobs = await extract_jobs(page, keyword)
 
-                jobs = deduplicate_jobs(
-                    jobs
-                )
+                jobs = deduplicate_jobs(jobs)
 
-                print(
-                    "Jobs found:",
-                    len(jobs)
-                )
+                print("Jobs found:", len(jobs))
 
-                save_files(
-                    jobs,
-                    keyword
-                )
+                save_files(jobs, keyword)
 
             except Exception as e:
 
-                print(
-                    "Keyword failed:",
-                    keyword
-                )
-
+                print("Keyword failed:", keyword)
                 print(e)
 
-                save_files(
-                    [],
-                    keyword
-                )
+                save_files([], keyword)
 
             finally:
 
@@ -437,17 +432,13 @@ def main():
 
     if args.keyword:
 
-        keywords = [
-            args.keyword
-        ]
+        keywords = [args.keyword]
 
     else:
 
         keywords = DEFAULT_KEYWORDS
 
-    asyncio.run(
-        scrape(keywords)
-    )
+    asyncio.run(scrape(keywords))
 
 
 if __name__ == "__main__":
