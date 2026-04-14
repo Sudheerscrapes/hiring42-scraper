@@ -1,18 +1,46 @@
-name: Run Hiring42 Scraper
+name: Hiring42 SAP SAC Scraper
 
-on: workflow_dispatch: schedule: - cron: “/15  * * *”
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # Every 15 minutes
+  workflow_dispatch:          # Manual trigger from GitHub UI
 
-jobs: run: runs-on: ubuntu-latest
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+
+      # ── 1. Checkout repo ──────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Playwright
-        run: pip install playwright
+      # ── 2. Python setup ───────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Install Browser
-        run: python -m playwright install chromium
+      # ── 3. Install dependencies ───────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          pip install playwright
 
-      - name: Run Scraper
-        run: python hiring42_scraper1.py
+      # ── 4. Install Playwright browsers ────────────────────────
+      - name: Install Playwright Chromium
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      # ── 5. Run scraper ────────────────────────────────────────
+      - name: Run scraper
+        run: |
+          python scraper.py
+
+      # ── 6. Upload CSVs as artifacts ───────────────────────────
+      - name: Upload CSV results
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-results-${{ github.run_number }}
+          path: "*.csv"
+          retention-days: 7        # Keep files for 7 days
