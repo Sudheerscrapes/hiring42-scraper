@@ -23,7 +23,15 @@ KEYWORDS = [
     ".net",
     "sap basis",
     "power bi",
-    "powerbi"
+    "powerbi",
+    "sap pp",
+    "sap qm",
+    "sap PPqm",
+    "sap hcm",
+    "sap ewm"
+    "sap abap"
+    
+    
 
 ]
 
