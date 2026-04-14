@@ -7,7 +7,6 @@ from playwright.async_api import async_playwright
 
 CSV_FILE = "hiring42_jobs.csv"
 
-
 KEYWORDS = [
 
     "sap sac",
@@ -28,13 +27,10 @@ KEYWORDS = [
     "sap qm",
     "sap PPqm",
     "sap hcm",
-    "sap ewm"
+    "sap ewm",
     "sap abap"
-    
-    
 
 ]
-
 
 def clean(text):
     if not text:
@@ -186,6 +182,7 @@ async def extract_jobs(page):
 
             jobs.append({
 
+                "keyword": "",
                 "title": title,
                 "location": location,
                 "email": email,
@@ -208,7 +205,7 @@ async def extract_jobs(page):
     return jobs
 
 
-def append_to_csv(jobs):
+def append_to_csv(jobs, keyword):
 
     fields = [
 
@@ -262,6 +259,31 @@ def append_to_csv(jobs):
 
             writer.writeheader()
 
+        # Write blank row if no jobs found
+        if not jobs:
+
+            writer.writerow({
+
+                "keyword": keyword,
+                "title": "",
+                "location": "",
+                "email": "",
+                "work_type": "",
+                "work_mode": "",
+                "experience": "",
+                "client": "",
+                "posted_date": "",
+                "description": "",
+                "scraped_at": datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+
+            })
+
+            print("[+] No jobs found — blank row added")
+
+            return
+
         for job in jobs:
 
             key = job["title"] + job["email"]
@@ -291,30 +313,11 @@ async def scrape(keyword):
 
         )
 
-        context = await browser.new_context(
-
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-
-            viewport={
-                "width": 1366,
-                "height": 768
-            },
-
-            locale="en-US",
-
-            timezone_id="America/New_York"
-
-        )
+        context = await browser.new_context()
 
         page = await context.new_page()
 
         page.set_default_timeout(60000)
-
-        page.set_default_navigation_timeout(60000)
 
         print("\n==============================")
         print("[+] Running keyword:", keyword)
@@ -366,10 +369,9 @@ async def scrape(keyword):
         jobs = await extract_jobs(page)
 
         for j in jobs:
-
             j["keyword"] = keyword
 
-        append_to_csv(jobs)
+        append_to_csv(jobs, keyword)
 
         await browser.close()
 
