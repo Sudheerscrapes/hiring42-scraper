@@ -50,7 +50,6 @@ async def close_popup(page):
             if await page.locator(b).count():
                 await page.click(b)
                 print("[+] Popup closed", flush=True)
-                await page.wait_for_timeout(2000)
                 break
     except:
         pass
@@ -146,8 +145,8 @@ async def extract_jobs(page):
 
                 if (
                     "YR" in line
-                    or "EXP" in line
-                    or "YEARS" in line
+                    or "EXP"
+                    or "YEARS"
                 ):
                     experience = line
 
@@ -251,6 +250,44 @@ def append_to_csv(jobs, keyword):
     )
 
 
+async def load_site_with_retry(page):
+
+    print("[+] Opening website...", flush=True)
+
+    for attempt in range(3):
+
+        try:
+
+            print(
+                f"[+] Attempt {attempt+1}",
+                flush=True
+            )
+
+            await page.goto(
+                "https://www.hiring42.com/",
+                wait_until="domcontentloaded",
+                timeout=90000
+            )
+
+            print(
+                "[+] Website loaded",
+                flush=True
+            )
+
+            return True
+
+        except Exception:
+
+            print(
+                "[!] Load failed — retrying",
+                flush=True
+            )
+
+            await page.wait_for_timeout(5000)
+
+    return False
+
+
 async def scrape_all():
 
     print("[+] Starting scraper", flush=True)
@@ -269,29 +306,40 @@ async def scrape_all():
 
         page = await context.new_page()
 
-        page.set_default_timeout(60000)
+        page.set_default_timeout(90000)
+        page.set_default_navigation_timeout(90000)
 
-        print("[+] Opening website...", flush=True)
+        success = await load_site_with_retry(page)
 
-        await page.goto(
-            "https://www.hiring42.com/",
-            wait_until="networkidle"
-        )
+        if not success:
 
-        print("[+] Page loaded", flush=True)
+            print(
+                "[!] Could not load website",
+                flush=True
+            )
+
+            await browser.close()
+
+            return
 
         await close_popup(page)
 
         await page.wait_for_timeout(3000)
 
         try:
+
             await page.click(
                 "text=All Jobs",
                 timeout=15000
             )
-            print("[+] Clicked All Jobs", flush=True)
+
+            print(
+                "[+] Clicked All Jobs",
+                flush=True
+            )
 
         except:
+
             print(
                 "[!] All Jobs button not found",
                 flush=True
@@ -302,29 +350,13 @@ async def scrape_all():
             flush=True
         )
 
-        try:
-
-            await page.wait_for_selector(
-                "input[placeholder*='Search'], input[type='text']",
-                timeout=60000
-            )
-
-        except:
-
-            print(
-                "[!] Search box not found — reloading page",
-                flush=True
-            )
-
-            await page.reload()
-
-            await page.wait_for_selector(
-                "input[placeholder*='Search'], input[type='text']",
-                timeout=60000
-            )
+        await page.wait_for_selector(
+            "input[type='text']",
+            timeout=60000
+        )
 
         search_box = page.locator(
-            "input[placeholder*='Search'], input[type='text']"
+            "input[type='text']"
         ).first
 
         for keyword in KEYWORDS:
@@ -354,7 +386,7 @@ async def scrape_all():
                 except:
 
                     print(
-                        "[!] No results found",
+                        "[!] No results",
                         flush=True
                     )
 
