@@ -148,7 +148,7 @@ async def find_and_fill_search(page, keyword):
 
 
 # ==============================
-# FIND AND CLICK SEARCH BUTTON
+# CLICK SEARCH BUTTON
 # ==============================
 
 async def click_search_button(page):
@@ -178,8 +178,6 @@ async def click_search_button(page):
         except:
 
             pass
-
-    # Fallback: press Enter on the search box
 
     try:
 
@@ -264,8 +262,6 @@ async def scroll_page(page):
 
         await page.wait_for_timeout(2000)
 
-        # Click Load More if present
-
         try:
 
             for btn_text in ["Load More", "Show More", "Next"]:
@@ -300,6 +296,60 @@ async def scroll_page(page):
 
 
 # ==============================
+# GET OUTERMOST CARDS VIA JS
+# KEY FIX: parent must NOT contain 'Posted:' — eliminates nested duplicates
+# ==============================
+
+async def get_outermost_cards(page):
+
+    # Use JS to grab element handles for outermost Posted: containers
+
+    result = await page.evaluate("""
+        () => {
+            const all = Array.from(document.querySelectorAll('*'));
+
+            const withPosted = all.filter(el =>
+                el.innerText && el.innerText.includes('Posted:')
+            );
+
+            // Keep only outermost: parent must NOT contain 'Posted:'
+            const outermost = withPosted.filter(el => {
+                const parent = el.parentElement;
+                return !parent || !parent.innerText.includes('Posted:');
+            });
+
+            // Return enough info to re-locate them
+            return outermost.map((el, i) => {
+                el.setAttribute('data-scrape-id', String(i));
+                return i;
+            });
+        }
+    """)
+
+    count = len(result) if result else 0
+
+    print(f"JS outermost cards found: {count}")
+
+    cards = []
+
+    for i in range(count):
+
+        try:
+
+            loc = page.locator(f"[data-scrape-id='{i}']")
+
+            if await loc.count():
+
+                cards.append(loc.first)
+
+        except:
+
+            pass
+
+    return cards
+
+
+# ==============================
 # EXTRACT JOBS
 # ==============================
 
@@ -327,47 +377,32 @@ async def extract_jobs(page, keyword):
 
         pass
 
-    # Wait for job cards
+    # Wait for any Posted: content
 
-    found_cards = False
+    try:
 
-    for card_selector in [
-        "div:has-text('Posted:')",
-        "[class*='job']",
-        "[class*='card']",
-        "[class*='result']",
-        "article",
-        "li:has-text('Posted:')",
-    ]:
+        await page.wait_for_selector(
+            "div:has-text('Posted:')",
+            timeout=15000
+        )
 
-        try:
+    except:
 
-            await page.wait_for_selector(
-                card_selector,
-                timeout=8000
-            )
-
-            count = await page.locator(card_selector).count()
-
-            if count > 0:
-
-                print(f"Card selector matched: '{card_selector}' ({count} items)")
-
-                found_cards = True
-
-                cards = await page.locator(card_selector).all()
-
-                break
-
-        except:
-
-            pass
-
-    if not found_cards:
-
-        print("No job cards detected with any selector")
+        print("No job content detected on page")
 
         return jobs
+
+    # Get outermost cards only (no nested duplicates)
+
+    cards = await get_outermost_cards(page)
+
+    if not cards:
+
+        print("No cards found")
+
+        return jobs
+
+    print(f"Processing {len(cards)} outermost cards")
 
     email_pattern = re.compile(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
@@ -377,9 +412,19 @@ async def extract_jobs(page, keyword):
 
         try:
 
-            # Split BEFORE cleaning to preserve line structure
-
             raw_text = await card.inner_text()
+
+            # Must contain Posted: and only ONE job
+
+            if "Posted:" not in raw_text:
+
+                continue
+
+            if raw_text.count("Posted:") > 1:
+
+                continue
+
+            # Split BEFORE cleaning to preserve lines
 
             lines = [
                 clean(line)
@@ -389,17 +434,23 @@ async def extract_jobs(page, keyword):
 
             full_text = " ".join(lines)
 
-            # Skip cards with no real content
-
             if len(full_text) < 10:
 
                 continue
 
-            # Title = first non-empty line
+            # Title = first meaningful line (length > 3)
 
-            title = lines[0] if lines else ""
+            title = ""
 
-            # Location = first line with comma, no date/email
+            for line in lines:
+
+                if len(line) > 3:
+
+                    title = line
+
+                    break
+
+            # Location = first line with comma, no date/email/score
 
             location = ""
 
@@ -408,11 +459,13 @@ async def extract_jobs(page, keyword):
                 if (
                     "," in line
                     and "Posted" not in line
+                    and "Score" not in line
                     and "@" not in line
                     and not re.search(r"\d{4}", line)
                 ):
 
                     location = line
+
                     break
 
             # Email
@@ -425,15 +478,21 @@ async def extract_jobs(page, keyword):
 
             tags = []
 
-            spans = await card.locator("span").all()
+            try:
 
-            for s in spans:
+                spans = await card.locator("span").all()
 
-                txt = clean(await s.inner_text())
+                for s in spans:
 
-                if txt and txt not in ("ACTIVE", ""):
+                    txt = clean(await s.inner_text())
 
-                    tags.append(txt)
+                    if txt and txt not in ("ACTIVE", ""):
+
+                        tags.append(txt)
+
+            except:
+
+                pass
 
             tags_text = " | ".join(tags)
 
