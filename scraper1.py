@@ -87,6 +87,8 @@ async def perform_search(page, keyword):
 
                 await page.click("text=All Jobs")
 
+                await page.wait_for_timeout(2000)
+
                 print("All Jobs clicked")
 
             except:
@@ -113,9 +115,7 @@ async def perform_search(page, keyword):
 
             print("Search clicked")
 
-            await page.wait_for_timeout(
-                6000
-            )
+            await page.wait_for_timeout(6000)
 
             return
 
@@ -127,18 +127,16 @@ async def perform_search(page, keyword):
 
                 raise
 
-            await page.wait_for_timeout(
-                5000
-            )
+            await page.wait_for_timeout(5000)
 
 
 # ==============================
-# SCROLL
+# SCROLL + LOAD MORE
 # ==============================
 
 async def scroll_page(page):
 
-    for _ in range(6):
+    for i in range(10):
 
         before = await page.evaluate(
             "document.body.scrollHeight"
@@ -150,11 +148,34 @@ async def scroll_page(page):
 
         await page.wait_for_timeout(2000)
 
+        # Click Load More if present
+
+        try:
+
+            load_more = page.locator(
+                "button:has-text('Load More')"
+            )
+
+            if await load_more.count():
+
+                await load_more.click()
+
+                print("Load More clicked (scroll", i + 1, ")")
+
+                await page.wait_for_timeout(3000)
+
+        except:
+
+            pass
+
         after = await page.evaluate(
             "document.body.scrollHeight"
         )
 
         if before == after:
+
+            print("Scroll end reached at iteration", i + 1)
+
             break
 
 
@@ -165,6 +186,26 @@ async def scroll_page(page):
 async def extract_jobs(page, keyword):
 
     jobs = []
+
+    # Save debug HTML so you can inspect if 0 cards found
+
+    try:
+
+        html = await page.content()
+
+        safe_kw = keyword.replace(" ", "_").replace('"', "")
+
+        with open(f"debug_{safe_kw}.html", "w", encoding="utf-8") as f:
+
+            f.write(html)
+
+        print("Debug HTML saved: debug_{}.html".format(safe_kw))
+
+    except:
+
+        pass
+
+    # Wait for job cards
 
     try:
 
@@ -193,89 +234,107 @@ async def extract_jobs(page, keyword):
 
         try:
 
-            full_text = clean(
-                await card.inner_text()
-            )
+            # FIX: split BEFORE cleaning so lines are preserved
 
-            lines = full_text.split("\n")
+            raw_text = await card.inner_text()
+
+            lines = [
+                clean(line)
+                for line in raw_text.split("\n")
+                if clean(line)
+            ]
+
+            full_text = " ".join(lines)
+
+            # Title = first non-empty line
 
             title = lines[0] if lines else ""
+
+            # Location = first line with comma that isn't a date/posted line
 
             location = ""
 
             for line in lines:
 
-                if "," in line and "Posted" not in line:
+                if (
+                    "," in line
+                    and "Posted" not in line
+                    and "@" not in line
+                    and not re.search(r"\d{4}", line)
+                ):
 
                     location = line
                     break
 
-            email_match = email_pattern.search(
-                full_text
-            )
+            # Email
 
-            email = (
-                email_match.group(0)
-                if email_match
-                else ""
-            )
+            email_match = email_pattern.search(full_text)
+
+            email = email_match.group(0) if email_match else ""
+
+            # Tags from span elements
 
             tags = []
 
-            spans = await card.locator(
-                "span"
-            ).all()
+            spans = await card.locator("span").all()
 
             for s in spans:
 
-                txt = clean(
-                    await s.inner_text()
-                )
+                txt = clean(await s.inner_text())
 
-                if txt and txt != "ACTIVE":
+                if txt and txt not in ("ACTIVE", ""):
 
                     tags.append(txt)
 
             tags_text = " | ".join(tags)
 
+            # Posted date
+
             posted_date = ""
 
             if "Posted:" in full_text:
 
-                posted_date = (
-                    full_text
-                    .split("Posted:")[1]
-                    .split("Score")[0]
-                    .strip()
-                )
+                raw_posted = full_text.split("Posted:")[1]
+
+                # Strip trailing fields like Score, status etc.
+
+                for stopper in ["Score", "ACTIVE", "Apply", "View"]:
+
+                    if stopper in raw_posted:
+
+                        raw_posted = raw_posted.split(stopper)[0]
+
+                posted_date = clean(raw_posted)
+
+            # Score
 
             score = ""
 
             if "Score:" in full_text:
 
-                score = (
-                    full_text
-                    .split("Score:")[1]
-                    .strip()
-                )
+                raw_score = full_text.split("Score:")[1]
 
-            status = ""
+                for stopper in ["ACTIVE", "Apply", "View", "Posted"]:
 
-            if "ACTIVE" in full_text:
+                    if stopper in raw_score:
 
-                status = "ACTIVE"
+                        raw_score = raw_score.split(stopper)[0]
+
+                score = clean(raw_score)
+
+            # Status
+
+            status = "ACTIVE" if "ACTIVE" in full_text else ""
 
             jobs.append({
-
-                "keyword": keyword,
+                "keyword":     keyword,
                 "posted_date": posted_date,
-                "title": title,
-                "location": location,
-                "email": email,
-                "tags": tags_text,
-                "status": status,
-                "score": score
-
+                "title":       title,
+                "location":    location,
+                "email":       email,
+                "tags":        tags_text,
+                "status":      status,
+                "score":       score,
             })
 
         except Exception as e:
@@ -311,27 +370,22 @@ def deduplicate_jobs(jobs):
 
 
 # ==============================
-# SAVE FILE (NO BLANK ROWS)
+# SAVE CSV
 # ==============================
 
 def save_files(jobs, keyword):
 
-    timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    safe_keyword = keyword.replace(
-        " ",
-        "_"
-    ).replace(
-        '"',
-        ""
+    safe_keyword = (
+        keyword
+        .replace(" ", "_")
+        .replace('"', "")
     )
 
     csv_file = f"{safe_keyword}_{timestamp}.csv"
 
     fields = [
-
         "keyword",
         "posted_date",
         "title",
@@ -339,21 +393,12 @@ def save_files(jobs, keyword):
         "email",
         "tags",
         "status",
-        "score"
-
+        "score",
     ]
 
-    with open(
-        csv_file,
-        "w",
-        newline="",
-        encoding="utf-8"
-    ) as f:
+    with open(csv_file, "w", newline="", encoding="utf-8") as f:
 
-        writer = csv.DictWriter(
-            f,
-            fieldnames=fields
-        )
+        writer = csv.DictWriter(f, fieldnames=fields)
 
         writer.writeheader()
 
@@ -366,13 +411,13 @@ def save_files(jobs, keyword):
         else:
 
             print("No roles found for:", keyword)
-            print("Created header-only file")
+            print("Header-only CSV created:", csv_file)
 
     print("Saved:", csv_file)
 
 
 # ==============================
-# MAIN
+# MAIN SCRAPE LOOP
 # ==============================
 
 async def scrape(keywords):
@@ -401,7 +446,7 @@ async def scrape(keywords):
 
                 jobs = deduplicate_jobs(jobs)
 
-                print("Jobs found:", len(jobs))
+                print("Unique jobs found:", len(jobs))
 
                 save_files(jobs, keyword)
 
@@ -425,18 +470,12 @@ def main():
 
     parser.add_argument(
         "--keyword",
-        help="Run single keyword"
+        help="Run single keyword (overrides DEFAULT_KEYWORDS)"
     )
 
     args = parser.parse_args()
 
-    if args.keyword:
-
-        keywords = [args.keyword]
-
-    else:
-
-        keywords = DEFAULT_KEYWORDS
+    keywords = [args.keyword] if args.keyword else DEFAULT_KEYWORDS
 
     asyncio.run(scrape(keywords))
 
